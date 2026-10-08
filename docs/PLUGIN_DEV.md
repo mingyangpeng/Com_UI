@@ -1,6 +1,6 @@
 # ComUI 插件开发说明
 
-面向插件开发人员（UI 面板 / 算法 / 节点算子三类交付物）。契约层代码在 `src/ComUI.Sdk/`，
+面向插件开发人员（UI 面板 / 算法 / 节点算子三类交付物）。第三方算法厂商接入算子库的专项规则见 [THIRD_PARTY_OPS.md](THIRD_PARTY_OPS.md)。契约层代码在 `src/ComUI.Sdk/`，
 本文与其同步；架构全貌见 [ARCHITECTURE.md](ARCHITECTURE.md)，交互组件复用规则见 [CONVENTIONS.md](CONVENTIONS.md)。
 
 ## 0. 总览：三类交付物
