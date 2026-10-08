@@ -1,0 +1,33 @@
+{
+  // ============================================================
+  // 节点图算子声明模板：本文件 + 算法 DLL 放在 comdll/algo/<名称>/，
+  // 宿主启动/重载时自动注册进「算子库」（算法流水线插件读取）。
+  // ============================================================
+  "node": {
+    "id": "algo.gamma",
+    "name": "伽马校正",
+    "group": "2D 图像",          // 算子库分组栏目
+    "category": "处理",          // 节点头部颜色：源/处理/输出
+    "description": "Gamma 校正：亮部/暗部非线性调整"
+  },
+
+  "runtime": "dotnet",
+  "assembly": "DemoAlgo.Core.dll",
+  "type": "DemoAlgo.Core.Filters",
+  "method": "Gamma",
+
+  // 输入端口：name 显示在节点上；bind = 方法参数名（缺省 = name）
+  "inputs": [
+    { "name": "输入", "bind": "input", "type": "image" }
+  ],
+
+  // 用户参数：与 algo.json 相同
+  "params": [
+    { "name": "gamma", "label": "Gamma", "type": "number", "default": 1.5, "min": 0.2, "max": 3 }
+  ],
+
+  // 输出端口：单输出可省略 from（直接用方法返回值）；多输出用 from 指定返回值属性路径
+  "outputs": [
+    { "name": "输出", "type": "image" }
+  ]
+}

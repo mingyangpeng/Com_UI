@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ComUI.Core</RootNamespace>
+    <Version>0.1.0</Version>
+    <Description>ComUI 引擎层：插件加载/隔离、数据总线、日志、声明式导入、配置（UI 层 ComUI.Host 引用本库）</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- LogService 画笔 / HostPluginContext(Control) / DataBus(Dispatcher) 需要 Avalonia 基础库 -->
+    <PackageReference Include="Avalonia" Version="11.3.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ComUI.Sdk\ComUI.Sdk.csproj" />
+  </ItemGroup>
+
+</Project>

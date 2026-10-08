@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ComUI.Plugin.Cloud3D</RootNamespace>
+    <Version>0.1.0</Version>
+    <!-- 后台上传需要 fixed 指针零拷贝访问载荷数组 -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- 自包含输出（同 Image2D）：OpenTK 进插件目录，原生库由 AssemblyDependencyResolver 按 runtimes/ 布局解析 -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ExcludeAssets=runtime：Avalonia 运行时用宿主版本（类型身份一致），不拷贝进插件目录 -->
+    <PackageReference Include="Avalonia" Version="11.3.*" ExcludeAssets="runtime" />
+    <PackageReference Include="OpenTK" Version="4.9.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ComUI.Sdk\ComUI.Sdk.csproj" />
+  </ItemGroup>
+
+  <!-- 编译完成后把插件输出复制到 comdll/ui/Cloud3D（递归 + 原生库平铺，同 Image2D） -->
+  <Target Name="CopyToComdll" AfterTargets="Build">
+    <ItemGroup>
+      <_PluginOutputs Include="$(OutDir)**\*.*" Exclude="$(OutDir)ComUI.Sdk.*;$(OutDir)ComUI.Plugin.Cloud3D.pdb" />
+      <_NativeFlat Include="$(OutDir)runtimes\win-x64\native\*.*;$(OutDir)runtimes\linux-x64\native\*.*;$(OutDir)runtimes\linux-arm64\native\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PluginOutputs)"
+          DestinationFiles="@(_PluginOutputs->'$(MSBuildThisFileDirectory)..\..\..\comdll\ui\Cloud3D\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_NativeFlat)"
+          DestinationFolder="$(MSBuildThisFileDirectory)..\..\..\comdll\ui\Cloud3D\"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

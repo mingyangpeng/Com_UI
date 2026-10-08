@@ -1,0 +1,37 @@
+{
+  // ============================================================
+  // 算法插件描述模板（算法开发人员填写）
+  // 交付物 = 本文件 + 算法 DLL（及依赖），放入 comdll/algo/<名称>/ 即完成接入
+  // ============================================================
+  "plugin": {
+    "id": "algo.demo",
+    "name": "演示拼接",
+    "version": "1.0.0",
+    "description": "模拟算法：生成一幅图像与一个点云并发布到总线，演示完整链路"
+  },
+
+  // dotnet = C# 程序集（反射调用）；native = C 导出函数
+  "runtime": "dotnet",
+  "assembly": "DemoAlgo.Core.dll",
+  "type": "DemoAlgo.Core.FakeStitcher",
+  "method": "Stitch",
+
+  // 用户参数：宿主自动生成参数对话框
+  "params": [
+    { "name": "points", "label": "点数",      "type": "int",    "default": 200000, "min": 10000, "max": 2000000 },
+    { "name": "voxel",  "label": "体素(mm)",  "type": "number", "default": 0.05 },
+    { "name": "mode",   "label": "配准模式",  "type": "enum",   "default": "ICP", "options": ["ICP", "NDT", "手动"] }
+  ],
+
+  // 输入：从总线取最新帧（name 对应方法参数名）
+  "inputs": [],
+
+  // 输出：返回值的属性 → 发布到主题（面板订阅即显示）
+  "outputs": [
+    { "from": "Image", "topic": "image/stitched" },
+    { "from": "Cloud", "topic": "cloud/merged" }
+  ],
+
+  // token = 方法含 CancellationToken 参数，宿主"取消"按钮生效
+  "cancel": { "mode": "token" }
+}

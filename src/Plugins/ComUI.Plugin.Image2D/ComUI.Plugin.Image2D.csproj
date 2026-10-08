@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ComUI.Plugin.Image2D</RootNamespace>
+    <Version>0.1.0</Version>
+    <!-- 把 NuGet 依赖（OpenTK 系列 + 原生 glfw）复制到输出，插件文件夹自包含：
+         AssemblyDependencyResolver 只在插件文件夹内解析，宿主兜底只覆盖 Avalonia/Sdk 等宿主已知程序集 -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- ExcludeAssets=runtime：Avalonia 运行时用宿主版本（类型身份一致），不拷贝进插件目录 -->
+    <PackageReference Include="Avalonia" Version="11.3.*" ExcludeAssets="runtime" />
+    <PackageReference Include="OpenTK" Version="4.9.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ComUI.Sdk\ComUI.Sdk.csproj" />
+  </ItemGroup>
+
+  <!-- 编译完成后把插件输出复制到 comdll/ui/Image2D（递归，保留 runtimes/ 原生库布局）；
+       另把原生库平铺一份到根目录（OpenTK 的 GLFW 解析器探测自身目录） -->
+  <Target Name="CopyToComdll" AfterTargets="Build">
+    <ItemGroup>
+      <_PluginOutputs Include="$(OutDir)**\*.*" Exclude="$(OutDir)ComUI.Sdk.*;$(OutDir)ComUI.Plugin.Image2D.pdb" />
+      <!-- 平铺原生库：排除 x86（宿主 x64），Linux 原生库同名共存便于 Ubuntu 直接用 -->
+      <_NativeFlat Include="$(OutDir)runtimes\win-x64\native\*.*;$(OutDir)runtimes\linux-x64\native\*.*;$(OutDir)runtimes\linux-arm64\native\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PluginOutputs)"
+          DestinationFiles="@(_PluginOutputs->'$(MSBuildThisFileDirectory)..\..\..\comdll\ui\Image2D\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_NativeFlat)"
+          DestinationFolder="$(MSBuildThisFileDirectory)..\..\..\comdll\ui\Image2D\"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

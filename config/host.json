@@ -1,0 +1,8 @@
+{
+  // 插件目录：相对仓库根目录或绝对路径；默认 comdll
+  "pluginDirectory": "comdll",
+  // 启动 / 重载后是否自动打开所有插件面板
+  "autoOpenPlugins": true,
+  // 官方插件（不可卸载）：加载后校验，缺失报错（产品基线）
+  "requiredPlugins": [ "ui.nodegraph" ]
+}

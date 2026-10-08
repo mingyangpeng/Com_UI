@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ComUI.Plugin.DemoPreview</RootNamespace>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\ComUI.Sdk\ComUI.Sdk.csproj" />
+  </ItemGroup>
+
+  <!-- 编译完成后把插件输出复制到 comdll/ui/DemoPreview -->
+  <Target Name="CopyToComdll" AfterTargets="Build">
+    <ItemGroup>
+      <_PluginOutputs Include="$(OutDir)*.*" Exclude="$(OutDir)ComUI.Sdk.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_PluginOutputs)"
+          DestinationFolder="$(MSBuildThisFileDirectory)..\..\..\comdll\ui\DemoPreview\"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

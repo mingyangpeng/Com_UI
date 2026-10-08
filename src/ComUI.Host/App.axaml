@@ -1,0 +1,164 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="ComUI.Host.App"
+             RequestedThemeVariant="Dark">
+
+    <!-- 共享颜色 -->
+    <Application.Resources>
+        <ResourceDictionary>
+            <SolidColorBrush x:Key="BgBrush">#1E1E1E</SolidColorBrush>
+            <SolidColorBrush x:Key="PanelBrush">#252526</SolidColorBrush>
+            <SolidColorBrush x:Key="PanelDarkBrush">#1B1B1C</SolidColorBrush>
+            <SolidColorBrush x:Key="BorderBrush">#3E3E42</SolidColorBrush>
+            <SolidColorBrush x:Key="TextBrush">#D4D4D4</SolidColorBrush>
+            <SolidColorBrush x:Key="TextDimBrush">#9D9D9D</SolidColorBrush>
+            <SolidColorBrush x:Key="AccentBrush">#0E639C</SolidColorBrush>
+            <SolidColorBrush x:Key="AccentHoverBrush">#1177BB</SolidColorBrush>
+        </ResourceDictionary>
+    </Application.Resources>
+
+    <Application.Styles>
+        <FluentTheme />
+        <StyleInclude Source="avares://Avalonia.Controls.DataGrid/Themes/Fluent.xaml"/>
+
+        <!-- 次要按钮（macOS 次级：灰底、圆角 6、紧凑） -->
+        <Style Selector="Button.ghost">
+            <Setter Property="Background" Value="#3A3A3E"/>
+            <Setter Property="Foreground" Value="#E8E8EA"/>
+            <Setter Property="Padding" Value="14,5"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.ghost:pointer /template/ ContentPresenter">
+            <Setter Property="Background" Value="#46464A"/>
+        </Style>
+        <Style Selector="Button.ghost:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="#333336"/>
+        </Style>
+
+        <!-- 主操作按钮（macOS 风格：系统蓝、圆角、紧凑） -->
+        <Style Selector="Button.primary">
+            <Setter Property="Background" Value="#0A84FF"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="18,5"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.primary:pointer /template/ ContentPresenter">
+            <Setter Property="Background" Value="#2B95FF"/>
+        </Style>
+        <Style Selector="Button.primary:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="#0A6CD6"/>
+        </Style>
+        <Style Selector="Button.primary:disabled /template/ ContentPresenter">
+            <Setter Property="Background" Value="#313437"/>
+            <Setter Property="Foreground" Value="#9D9D9D"/>
+        </Style>
+
+        <!-- 对话框输入控件（macOS 内嵌深色 + 细边框） -->
+        <Style Selector="TextBox.input">
+            <Setter Property="Background" Value="#2A2A2E"/>
+            <Setter Property="Foreground" Value="#FFFFFF"/>
+            <Setter Property="CaretBrush" Value="White"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="BorderBrush" Value="#3F3F44"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="9,5"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="FontSize" Value="12.5"/>
+        </Style>
+        <Style Selector="NumericUpDown.input">
+            <Setter Property="Background" Value="#2A2A2E"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="ButtonSpinnerLocation" Value="Right"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="FontSize" Value="12.5"/>
+        </Style>
+        <Style Selector="ComboBox.input">
+            <Setter Property="Background" Value="#2A2A2E"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="FontSize" Value="12.5"/>
+        </Style>
+
+        <!-- 对话框窗口 -->
+        <!-- 日志列表：紧凑行距 -->
+        <Style Selector="ListBox.logList ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="MinHeight" Value="0"/>
+            <Setter Property="Margin" Value="0"/>
+        </Style>
+
+        <Style Selector="Window.dialog">
+            <Setter Property="Background" Value="#232326"/>
+            <Setter Property="FontFamily" Value="Microsoft YaHei UI, Segoe UI, Noto Sans CJK SC, WenQuanYi Micro Hei, Ubuntu, sans-serif"/>
+        </Style>
+
+        <!-- 标签页关闭按钮 -->
+        <Style Selector="Button.tabclose">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#9D9D9D"/>
+            <Setter Property="FontSize" Value="9"/>
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Width" Value="18"/>
+            <Setter Property="Height" Value="18"/>
+            <Setter Property="CornerRadius" Value="3"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.tabclose:pointer /template/ ContentPresenter">
+            <Setter Property="Background" Value="#4F4F4F"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+
+        <!-- 侧边栏条目（面板 / 算法列表行） -->
+        <Style Selector="Button.sideitem">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#CFCFD4"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="CornerRadius" Value="5"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.sideitem:pointer /template/ ContentPresenter">
+            <Setter Property="Background" Value="#2E2E33"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+        <Style Selector="Button.sideitem:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="#38383E"/>
+        </Style>
+
+        <!-- 活动栏按钮 -->
+        <Style Selector="Button.activity">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="CornerRadius" Value="7"/>
+            <Setter Property="Margin" Value="4,2"/>
+            <Setter Property="Foreground" Value="#868690"/>
+            <Setter Property="FontSize" Value="17"/>
+            <Setter Property="Width" Value="46"/>
+            <Setter Property="Height" Value="42"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.activity:pointer /template/ ContentPresenter">
+            <Setter Property="Background" Value="#2A2D2E"/>
+            <Setter Property="Foreground" Value="White"/>
+        </Style>
+
+        <!-- 分隔条 -->
+        <Style Selector="GridSplitter">
+            <Setter Property="Background" Value="#333337"/>
+        </Style>
+
+        <!-- 列表滚动条区域背景 -->
+        <Style Selector="ListBox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+    </Application.Styles>
+</Application>

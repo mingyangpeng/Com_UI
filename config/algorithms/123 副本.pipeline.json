@@ -1,0 +1,106 @@
+{
+  "Name": "123",
+  "Locked": true,
+  "Nodes": [
+    {
+      "Id": "0c4ecde4",
+      "Def": "source.heightmap",
+      "Title": null,
+      "X": 240,
+      "Y": 110,
+      "Params": {
+        "n": 256,
+        "amp": 0.4
+      }
+    },
+    {
+      "Id": "86d005e8",
+      "Def": "pub.image",
+      "Title": null,
+      "X": 540,
+      "Y": 40,
+      "Params": {
+        "topic": "image/stitched"
+      }
+    },
+    {
+      "Id": "71d94dda",
+      "Def": "pub.cloud",
+      "Title": null,
+      "X": 540,
+      "Y": 180,
+      "Params": {
+        "topic": "cloud/merged"
+      }
+    },
+    {
+      "Id": "f6fcf38a",
+      "Def": "source.cube",
+      "Title": null,
+      "X": 10,
+      "Y": 300,
+      "Params": {
+        "size": 2,
+        "step": 0.02
+      }
+    },
+    {
+      "Id": "64768447",
+      "Def": "pub.cloud",
+      "Title": null,
+      "X": 240,
+      "Y": 350,
+      "Params": {
+        "topic": "cloud/merged"
+      }
+    },
+    {
+      "Id": "9e450962",
+      "Def": "draw.2d",
+      "Title": null,
+      "X": 840,
+      "Y": 40,
+      "Params": {}
+    },
+    {
+      "Id": "2bf461c3",
+      "Def": "draw.3d",
+      "Title": null,
+      "X": 840,
+      "Y": 350,
+      "Params": {}
+    }
+  ],
+  "Connections": [
+    {
+      "From": "0c4ecde4",
+      "FromPort": "\u56FE\u50CF",
+      "To": "86d005e8",
+      "ToPort": "\u8F93\u5165"
+    },
+    {
+      "From": "0c4ecde4",
+      "FromPort": "\u70B9\u4E91",
+      "To": "71d94dda",
+      "ToPort": "\u8F93\u5165"
+    },
+    {
+      "From": "f6fcf38a",
+      "FromPort": "\u70B9\u4E91",
+      "To": "64768447",
+      "ToPort": "\u8F93\u5165"
+    },
+    {
+      "From": "0c4ecde4",
+      "FromPort": "\u56FE\u50CF",
+      "To": "9e450962",
+      "ToPort": "\u8F93\u5165"
+    },
+    {
+      "From": "f6fcf38a",
+      "FromPort": "\u70B9\u4E91",
+      "To": "2bf461c3",
+      "ToPort": "\u8F93\u5165"
+    }
+  ]
+}

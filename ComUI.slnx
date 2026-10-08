@@ -1,0 +1,18 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ComUI.Core/ComUI.Core.csproj" />
+    <Project Path="src/ComUI.Host/ComUI.Host.csproj" />
+    <Project Path="src/ComUI.Sdk/ComUI.Sdk.csproj" />
+  </Folder>
+  <Folder Name="/src/Plugins/">
+    <Project Path="src/Plugins/ComUI.Plugin.NodeGraph/ComUI.Plugin.NodeGraph.csproj" />
+    <Project Path="src/Plugins/ComUI.Plugin.Table/ComUI.Plugin.Table.csproj" />
+    <Project Path="src/Plugins/ComUI.Plugin.DemoPreview/ComUI.Plugin.DemoPreview.csproj" />
+    <Project Path="src/Plugins/ComUI.Plugin.Image2D/ComUI.Plugin.Image2D.csproj" />
+    <Project Path="src/Plugins/ComUI.Plugin.Cloud3D/ComUI.Plugin.Cloud3D.csproj" />
+    <Project Path="src/Plugins/DemoAlgo.Core/DemoAlgo.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ComUI.Core.Tests/ComUI.Core.Tests.csproj" />
+  </Folder>
+</Solution>

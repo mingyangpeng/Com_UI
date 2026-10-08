@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>ComUI.Sdk</RootNamespace>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Sdk 只依赖 Avalonia 基础库（Control 等类型），跨平台 -->
+    <PackageReference Include="Avalonia" Version="11.3.*" />
+  </ItemGroup>
+
+</Project>

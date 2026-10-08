@@ -1,0 +1,17 @@
+# 构建产物（插件编译后复制到 comdll/ui/，构建自动重建）
+[Bb]in/
+[Oo]bj/
+comdll/ui/
+
+# 运行时用户状态（会话布局/界面顺序，每次运行生成）
+config/session.json
+config/panel_order.json
+config/op_order.json
+
+# 运行输出与调试（截图/日志/备份）
+output/
+
+# IDE
+.vs/
+.idea/
+*.user

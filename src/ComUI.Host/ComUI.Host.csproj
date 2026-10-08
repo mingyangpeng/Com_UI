@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>ComUI.Host</RootNamespace>
+    <AssemblyName>ComUI.Host</AssemblyName>
+    <Version>0.2.0</Version>
+    <Title>ComUI 显示平台</Title>
+    <Product>ComUI 显示平台</Product>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.*" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.*" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.*" />
+    <PackageReference Include="Avalonia.Controls.DataGrid" Version="11.3.*" />
+
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ComUI.Sdk\ComUI.Sdk.csproj" />
+    <ProjectReference Include="..\ComUI.Core\ComUI.Core.csproj" />
+  </ItemGroup>
+
+</Project>
