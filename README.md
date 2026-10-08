@@ -11,6 +11,7 @@ Com_UI/
 ├── ComUI.slnx
 ├── start.bat / start.sh
 ├── docs/BUGS.md               # 开发 Bug 记录（持续维护）
+├── docs/PLUGIN_DEV.md         # 插件开发说明（UI/算法/节点算子三类交付物）
 ├── comdll/                    # ★ 插件与数据目录
 │   ├── common/                # 共享契约：算法 IO 接口 DLL（宿主最先加载）
 │   ├── ui/<插件名>/            # UI 插件（实现 IPlugin，可注册多个面板）
