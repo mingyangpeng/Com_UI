@@ -47,7 +47,7 @@ comdll/algo/<你的名称>/
     "description": "Gamma 校正：亮部/暗部非线性调整"   // 悬停提示
   },
 
-  "runtime": "dotnet",               // ★ 当前仅支持 dotnet（native 请包一层 C# 静态壳，见 §8.7）
+  "runtime": "dotnet",               // ★ 当前仅支持 dotnet（native 请包一层 C# 壳，导出规则见 §5）
   "assembly": "YourAlgo.dll",        // ★ 相对本 JSON 所在目录
   "type": "YourNs.Filters",          // ★ 类型全名（也可写短名，按 FullName/Name 回退匹配）
   "method": "Gamma",                 // ★ 入口方法名（public/nonpublic、静态/实例均可）
@@ -219,7 +219,76 @@ for (size_t i = 0; i < pts.size(); i++) {
 
 ---
 
-## 5. 执行模型
+## 5. C++ 原生 DLL 构建规则（导出契约）
+
+宿主的 native 执行器目前为预留桩（当前接入需按 §9.7 包 C# 壳），但 **C++ 侧 DLL 现在就必须按本节规则构建**——
+这决定壳层 P/Invoke（以及未来原生执行器）能否找到你的符号。三条铁律 + 完整模板：
+
+### 5.1 一个宏：编译期定义 → 导出；使用方不定义 → 导入
+
+```cpp
+// imgio_api.h —— 与你的 C 接口头文件一起交付
+#pragma once
+
+#ifdef IMGIO_EXPORTS
+#  define IMGIO_API __declspec(dllexport)   // 构建本 DLL 时定义 IMGIO_EXPORTS → 导出
+#else
+#  define IMGIO_API __declspec(dllimport)   // 使用方（宿主/壳）不定义 → 导入
+#endif
+// Linux 等价：#define IMGIO_API __attribute__((visibility("default")))
+```
+
+**CMake 侧（最易错）**：`IMGIO_EXPORTS` 必须是 **PRIVATE**：
+
+```cmake
+target_compile_definitions(YourAlgo PRIVATE IMGIO_EXPORTS)   # ✔ PRIVATE
+# 绝不能写成 PUBLIC / INTERFACE —— 定义会传播给使用方，
+# 使用方也把你的头文件展开成 dllexport → 链接时找不到导入符号。
+```
+
+### 5.2 可见性：hidden + 不自动导出 → 接口函数逐个带宏
+
+```cmake
+set_target_properties(YourAlgo PROPERTIES
+    CXX_VISIBILITY_PRESET hidden          # 非导出符号对外不可见
+    WINDOWS_EXPORT_ALL_SYMBOLS OFF)       # 不自动导出全部符号
+```
+
+这意味着**不带 `IMGIO_API` 宏的符号一律不导出**——C 接口函数必须**逐个**标注：
+
+```cpp
+IMGIO_API int  your_algo_run(int width, int height, const unsigned char* bgra);
+IMGIO_API void your_algo_free(void* handle);
+```
+
+### 5.3 `extern "C"` 必须（防 C++ 名字改编）
+
+C++ 编译器会做名字改编（name mangling），宿主侧 `GetProcAddress` / `DllImport` 按原名找符号会失败。
+头文件用标准包裹模式，C/C++ 双方都能包含：
+
+```cpp
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+IMGIO_API int  your_algo_run(int width, int height, const unsigned char* bgra);
+IMGIO_API void your_algo_free(void* handle);
+
+#ifdef __cplusplus
+}
+#endif
+```
+
+### 5.4 检查清单
+
+- [ ] 头文件：宏 + `extern "C"` 包裹（如上模板）；
+- [ ] CMake：`PRIVATE IMGIO_EXPORTS`、`CXX_VISIBILITY_PRESET hidden`、`WINDOWS_EXPORT_ALL_SYMBOLS OFF`；
+- [ ] 每个 C 接口函数都带 `IMGIO_API`；
+- [ ] 验证：Windows 下 `dumpbin /exports YourAlgo.dll`（或 `objdump -p`）应看到**未改编**的函数名。
+
+---
+
+## 6. 执行模型
 
 1. **拓扑序执行**：Kahn 拓扑排序后逐节点执行。图中有环 → 抛「图中存在环路，无法执行：…」（整条流水线不启动）。
 2. **后台线程**：整张图在 `Task.Run` 后台线程跑，方法内可长时间运算，**不要碰任何 UI 控件**。
@@ -228,11 +297,11 @@ for (size_t i = 0; i < pts.size(); i++) {
 5. **取消（如实说明）**：`CancellationToken` 参数是**预留位，当前注入的是 `CancellationToken.None`** —— 你方法里的 `ThrowIfCancellationRequested()` 不会真的被触发。真正生效的取消只在**节点与节点之间**检查（点「■ 停止」后后续节点不再启动）。长任务请自行控制时长或分块。
 6. **日志**：`IProgress<string>.Report(msg)` 的内容进底部日志面板，前缀为 `[<算子名>]`；返回值前自行 `Console` 打印不会被收集。
 7. **自动运行**：默认**关**（手动「▶ 运行」）。开启后改参数/连线会自动重跑。
-8. **内嵌预览**：`draw.2d` / `draw.3d` 那种卡片内嵌预览**只对内置算子开放**，JSON 声明的算子没有 —— 想看结果就接发布节点（§6）。
+8. **内嵌预览**：`draw.2d` / `draw.3d` 那种卡片内嵌预览**只对内置算子开放**，JSON 声明的算子没有 —— 想看结果就接发布节点（§7）。
 
 ---
 
-## 6. 数据如何到达工作台（最易踩的关键点）
+## 7. 数据如何到达工作台（最易踩的关键点）
 
 **JSON 算子的 outputs 只流向下游端口，不会自动上总线。** 无论返回值是什么，工作台都看不到，除非末端接了内置的**「发布图像」/「发布点云」**节点：
 
@@ -253,7 +322,7 @@ for (size_t i = 0; i < pts.size(); i++) {
 
 ---
 
-## 7. 接入验证清单（七步）
+## 8. 接入验证清单（七步）
 
 1. **放置**：`comdll/algo/<名称>/` 下放 `YourAlgo.dll` + `your.node.json`，依赖全部同目录，目标框架 net8.0，不拷 `ComUI.Sdk.dll`。
 2. **加载**：宿主内按 **F5**（或重启），底部日志出现 `算子(JSON)已注册: <名称> <<id>> ← <文件>`。
@@ -266,7 +335,7 @@ for (size_t i = 0; i < pts.size(); i++) {
    | `找不到程序集 X` | `assembly` 拼错，或 DLL 不在 JSON 同目录 |
    | `找不到类型 X` | `type` 命名空间/类名不对 |
    | `找不到方法 X.Y` | 方法名不对，或**同名重载**导致歧义 |
-   | `节点图算子暂仅支持 runtime=dotnet…` | native DLL 需包一层 C# 静态壳（§8.7） |
+   | `节点图算子暂仅支持 runtime=dotnet…` | native DLL 需包一层 C# 壳（§5） |
    | **无任何日志** | 文件不在 `comdll/algo/` 下、后缀不是 `*.node.json`，或 **Id 与已有算子重复被静默忽略** |
 3. **出现**：左侧「🧰 算子库」按 `group` 栏目分组出现你的算子（可搜索、栏目头可拖拽排序）。
 4. **建节点**：拖到画布（或单击加到中心），节点卡片上参数按 `params` 生成、端口按 `inputs/outputs` 生成。
@@ -276,7 +345,7 @@ for (size_t i = 0; i < pts.size(); i++) {
 
 ---
 
-## 8. 规则红线（七条）
+## 9. 规则红线（七条）
 
 1. **纯计算**：算子 DLL 禁止引用/创建任何 UI 控件（Avalonia 等）—— 显示一律经总线由工作台负责。
 2. **自包含**：目标框架 **net8.0**；所有第三方依赖平铺在本目录（宿主只在本目录解析）；**`ComUI.Sdk.dll` 由宿主提供，不要拷入**。
@@ -284,4 +353,4 @@ for (size_t i = 0; i < pts.size(); i++) {
 4. **数组不可变**：产出/发布的载荷数组不得原地修改（下游零拷贝共享，见 §4）。
 5. **异常带信息**：`throw new Exception("人话描述")` —— 节点红点悬停直接显示它，也是流水线中止时唯一的线索。
 6. **无生命周期钩子**：算子没有 `Initialize`/`Shutdown`（不是 `IPlugin`）；实例方法每次执行新建实例。资源在方法内自申请自释放。
-7. **native 暂不支持**：`runtime` 只认 `dotnet`。C/C++ 导出的函数请**包一层 C# 静态（或实例）方法壳**，在壳里做 P/Invoke 与数据转换，再把壳方法声明到 `method`。
+7. **native 暂不支持**：`runtime` 只认 `dotnet`。C/C++ 导出的函数请**包一层 C# 静态（或实例）方法壳**，在壳里做 P/Invoke 与数据转换，再把壳方法声明到 `method`；C++ 侧 DLL 按第 §5 节导出契约构建。
