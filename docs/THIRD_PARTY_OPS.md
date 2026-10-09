@@ -77,7 +77,7 @@ comdll/algo/<你的名称>/
 | `node.group` | | 算子库栏目名，缺省 `通用`。新栏目自动出现在列表尾部，顺序存 `config/op_order.json` |
 | `node.category` | | 仅决定节点头配色（`源`/`处理`/`输出`），缺省 `处理`。写其它值按字面显示 |
 | `node.description` | | 悬停提示文本 |
-| `runtime` | ★ | 仅支持 `dotnet`；其它值 → 报「节点图算子暂仅支持 runtime=dotnet（native 请包一层 C# 壳）」 |
+| `runtime` | ★ | `dotnet`（C# 反射）或 `native`（C++ DLL，统一 C ABI 见 §5.5，宿主自动 marshal） |
 | `assembly` | ★ | DLL 文件名，相对本 JSON 目录；找不到 → 报「找不到程序集 X」 |
 | `type` | ★ | 类型全名。先按全名解析，失败再按 `FullName` 或 `Name` 回退匹配；找不到 → 报「找不到类型 X」 |
 | `method` | ★ | 方法名。`Public|NonPublic|Static|Instance` 全涵盖；找不到 → 报「找不到方法 X.Y」。<br>⚠️ **不要写同名重载**：多匹配会抛 `AmbiguousMatchException`，整个算子注册失败 |
@@ -221,8 +221,9 @@ for (size_t i = 0; i < pts.size(); i++) {
 
 ## 5. C++ 原生 DLL 构建规则（导出契约）
 
-宿主的 native 执行器目前为预留桩（当前接入需按 §9.7 包 C# 壳），但 **C++ 侧 DLL 现在就必须按本节规则构建**——
-这决定壳层 P/Invoke（以及未来原生执行器）能否找到你的符号。三条铁律 + 完整模板：
+**native 已支持即插即用**：`runtime: "native"` 的 JSON + C++ DLL，宿主加载时按 JSON 自动生成调用壳
+（按 §5.5 统一 C ABI marshal 参数/图像/点云并调 algo_free 释放）——**第三方零 C# 代码**。
+本节前四条是 DLL 的导出与可见性铁律（决定宿主能否找到你的符号），§5.5 是调用契约。
 
 ### 5.1 一个宏：编译期定义 → 导出；使用方不定义 → 导入
 
@@ -286,6 +287,98 @@ IMGIO_API void your_algo_free(void* handle);
 - [ ] 每个 C 接口函数都带 `IMGIO_API`；
 - [ ] 验证：Windows 下 `dumpbin /exports YourAlgo.dll`（或 `objdump -p`）应看到**未改编**的函数名。
 
+
+### 5.5 统一 C ABI（调用契约，v1）
+
+每个算子导出**一个统一签名入口**（JSON `method` 指名）+ 一个释放函数。头文件模板（可直接抄）：
+
+```c
+// comui_native_abi.h —— ComUI 原生算子统一 C ABI
+#pragma once
+#include <stdint.h>
+
+#ifdef IMGIO_EXPORTS
+#  define IMGIO_API __declspec(dllexport)     // 构建本 DLL 时定义；Linux 用 visibility("default")
+#else
+#  define IMGIO_API __declspec(dllimport)
+#endif
+
+typedef struct AlgoCParam  { int32_t kind; double d; int32_t i; const char* s; } AlgoCParam;
+// kind: 0=double  1=int32  2=text(UTF-8)  3=bool(i!=0)
+
+typedef struct AlgoCImage  { int32_t width, height; const uint8_t* bgra; } AlgoCImage;   // 紧排 BGRA
+typedef struct AlgoCCloud  { int32_t count; const float* xyz; const uint8_t* rgb; } AlgoCCloud;  // SoA，rgb 可空
+
+typedef struct AlgoCInput  { int32_t paramCount; const AlgoCParam* params;
+                             int32_t imageCount; const AlgoCImage* images;
+                             int32_t cloudCount; const AlgoCCloud* clouds; } AlgoCInput;
+
+typedef struct AlgoCImageOut { int32_t width, height; uint8_t* bgra; } AlgoCImageOut;    // DLL 分配
+typedef struct AlgoCCloudOut { int32_t count; float* xyz; uint8_t* rgb; } AlgoCCloudOut; // DLL 分配，rgb 可空
+
+typedef struct AlgoCOutput { int32_t imageCount; AlgoCImageOut* images;
+                             int32_t cloudCount; AlgoCCloudOut* clouds;
+                             const char* error; } AlgoCOutput;   // error=静态存储，宿主只读
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// 算子入口（每个算子一个导出，JSON method 指名；返回 0=成功，非 0=失败码）
+IMGIO_API int32_t your_algo(const AlgoCInput* in, AlgoCOutput* out);
+
+// 释放约定（必须导出）：宿主拷贝完输出后逐指针调用（数组与每个数据缓冲；error 不释放）
+IMGIO_API void algo_free(void* p);
+
+#ifdef __cplusplus
+}
+#endif
+```
+
+**实现示例**（图像伽马，对应下方 node.json）：
+
+```cpp
+IMGIO_API int32_t native_gamma(const AlgoCInput* in, AlgoCOutput* out) {
+    double gamma = 1.0;
+    for (int i = 0; i < in->paramCount; i++)
+        if (in->params[i].kind == 0) gamma = in->params[i].d;          // 按 JSON 声明顺序
+    const AlgoCImage* img = &in->images[0];                            // 输入按端口顺序
+
+    size_t n = (size_t)img->width * img->height * 4;
+    uint8_t* px = (uint8_t*)malloc(n);                                  // DLL 分配输出
+    for (size_t i = 0; i < n; i += 4) {
+        px[i]   = (uint8_t)(255 * pow(img->bgra[i]   / 255.0, 1.0 / gamma));
+        px[i+1] = (uint8_t)(255 * pow(img->bgra[i+1] / 255.0, 1.0 / gamma));
+        px[i+2] = (uint8_t)(255 * pow(img->bgra[i+2] / 255.0, 1.0 / gamma));
+        px[i+3] = 255;
+    }
+    out->images = (AlgoCImageOut*)malloc(sizeof(AlgoCImageOut));
+    out->images[0] = { img->width, img->height, px };
+    out->imageCount = 1;  out->cloudCount = 0;  out->error = nullptr;
+    return 0;
+}
+IMGIO_API void algo_free(void* p) { free(p); }
+```
+
+**node.json（native）**：
+
+```jsonc
+{
+  "node": { "id": "vendor.native_gamma", "name": "原生伽马", "group": "2D 图像", "category": "处理" },
+  "runtime": "native",
+  "assembly": "YourAlgo.dll",
+  "method": "native_gamma",
+  "inputs":  [ { "name": "输入", "type": "image" } ],
+  "params":  [ { "name": "gamma", "label": "Gamma", "type": "number", "default": 2.0 } ],
+  "outputs": [ { "name": "输出", "type": "image" } ]
+}
+```
+
+**绑定规则**：参数按 JSON `params` 声明顺序传入（`kind` 区分类型）；输入按 `inputs` 端口顺序传入
+（`type` 决定进 images 还是 clouds）；返回的图像/点云按 `outputs` 端口顺序依次分发
+（image 端口取第 1/2/…个返回图像，cloud 端口同理）。`algo.json`（算法配方侧边栏）同样支持
+`runtime: "native"`——输入按主题取总线最新帧，输出 `from` 字段填 `"image"`/`"cloud"`（缺省 image）。
+
 ---
 
 ## 6. 执行模型
@@ -335,7 +428,7 @@ IMGIO_API void your_algo_free(void* handle);
    | `找不到程序集 X` | `assembly` 拼错，或 DLL 不在 JSON 同目录 |
    | `找不到类型 X` | `type` 命名空间/类名不对 |
    | `找不到方法 X.Y` | 方法名不对，或**同名重载**导致歧义 |
-   | `节点图算子暂仅支持 runtime=dotnet…` | native DLL 需包一层 C# 壳（§5） |
+   | `找不到原生库 / 找不到导出…` | 检查 assembly 路径与导出名（§5 导出规则：宏/extern C/dumpbin 验证） |
    | **无任何日志** | 文件不在 `comdll/algo/` 下、后缀不是 `*.node.json`，或 **Id 与已有算子重复被静默忽略** |
 3. **出现**：左侧「🧰 算子库」按 `group` 栏目分组出现你的算子（可搜索、栏目头可拖拽排序）。
 4. **建节点**：拖到画布（或单击加到中心），节点卡片上参数按 `params` 生成、端口按 `inputs/outputs` 生成。
@@ -353,4 +446,4 @@ IMGIO_API void your_algo_free(void* handle);
 4. **数组不可变**：产出/发布的载荷数组不得原地修改（下游零拷贝共享，见 §4）。
 5. **异常带信息**：`throw new Exception("人话描述")` —— 节点红点悬停直接显示它，也是流水线中止时唯一的线索。
 6. **无生命周期钩子**：算子没有 `Initialize`/`Shutdown`（不是 `IPlugin`）；实例方法每次执行新建实例。资源在方法内自申请自释放。
-7. **native 暂不支持**：`runtime` 只认 `dotnet`。C/C++ 导出的函数请**包一层 C# 静态（或实例）方法壳**，在壳里做 P/Invoke 与数据转换，再把壳方法声明到 `method`；C++ 侧 DLL 按第 §5 节导出契约构建。
+7. **native = 统一 C ABI**：`runtime: "native"` 走 §5.5 契约（单一入口签名 + algo_free 释放约定），宿主自动 marshal；只有需要复杂生命周期/自定义宿主服务时才写 C# 壳（IAlgoPlugin）。

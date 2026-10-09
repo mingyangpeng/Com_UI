@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ComUI.Sdk;
+using ComUI.Sdk.Native;
 
 namespace ComUI.Plugin.NodeGraph;
 
@@ -56,23 +57,36 @@ public static class NodeJsonRegistry
                 throw new Exception("缺少 node.id / node.name");
 
             Assembly? asm = null;
+            NativeAlgoInvoker? native = null;
             if (json.Runtime.Equals("dotnet", StringComparison.OrdinalIgnoreCase))
             {
                 var asmPath = Path.Combine(folder, json.Assembly);
                 if (!File.Exists(asmPath)) throw new Exception($"找不到程序集 {json.Assembly}");
                 asm = Assembly.LoadFrom(asmPath); // 默认上下文：重复加载自动复用
             }
+            else if (json.Runtime.Equals("native", StringComparison.OrdinalIgnoreCase))
+            {
+                // native：C++ DLL + 统一 C ABI——加载时按 JSON 自动生成调用壳（宿主侧 marshal），第三方零 C# 代码
+                var dllPath = Path.Combine(folder, json.Assembly);
+                if (!File.Exists(dllPath)) throw new Exception($"找不到原生库 {json.Assembly}");
+                native = new NativeAlgoInvoker(dllPath, json.Method ?? throw new Exception("runtime=native 需要 method"));
+            }
             else
             {
-                throw new Exception("节点图算子暂仅支持 runtime=dotnet（native 请包一层 C# 壳）");
+                throw new Exception($"不支持的 runtime：{json.Runtime}（dotnet / native）");
             }
 
-            var type = asm!.GetType(json.Type ?? "", false)
+            MethodInfo? method = null;
+            Type? type = null;
+            if (asm is not null)
+            {
+                type = asm.GetType(json.Type ?? "", false)
                        ?? asm.GetTypes().FirstOrDefault(t => t.FullName == json.Type || t.Name == json.Type)
                        ?? throw new Exception($"找不到类型 {json.Type}");
-            var method = type.GetMethod(json.Method ?? "",
-                            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
-                        ?? throw new Exception($"找不到方法 {json.Type}.{json.Method}");
+                method = type.GetMethod(json.Method ?? "",
+                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.Instance)
+                            ?? throw new Exception($"找不到方法 {json.Type}.{json.Method}");
+            }
 
             return new NodeDef
             {
@@ -101,7 +115,9 @@ public static class NodeJsonRegistry
                     Min = p.Min,
                     Max = p.Max,
                 }).ToArray(),
-                Execute = ctx => Invoke(json, method, type, ctx),
+                Execute = native is not null
+                    ? ctx => InvokeNative(json, native, ctx)
+                    : ctx => Invoke(json, method!, type!, ctx),
             };
         }
         catch (Exception ex)
@@ -124,6 +140,54 @@ public static class NodeJsonRegistry
             "bool" or "boolean" => el.ValueKind == JsonValueKind.True || el.ToString() == "true",
             _ => el.ToString(),
         };
+    }
+
+    /// <summary>native 执行：按 JSON 声明收集输入（按端口类型）与参数（按声明顺序），
+    /// 经统一 C ABI 调用，输出按端口类型依次分发（image 端口取返回图像、cloud 取点云）。</summary>
+    private static Dictionary<string, object?> InvokeNative(NodeJson json, NativeAlgoInvoker native, NodeRunContext ctx)
+    {
+        var images = new List<ImagePayload>();
+        var clouds = new List<CloudPayload>();
+        foreach (var port in json.Inputs)
+        {
+            if (!ctx.Inputs.TryGetValue(port.Name, out var frame) || frame is null)
+                throw new Exception($"输入「{port.Name}」未连线或上游无产出");
+            if (ParseType(port.Type) == PortType.Cloud)
+            {
+                if (frame is not CloudPayload c) throw new Exception($"输入「{port.Name}」需要点云，实际收到 {frame.GetType().Name}");
+                clouds.Add(c);
+            }
+            else
+            {
+                if (frame is not ImagePayload img) throw new Exception($"输入「{port.Name}」需要图像，实际收到 {frame.GetType().Name}");
+                images.Add(img);
+            }
+        }
+
+        // 参数按 JSON 声明顺序取节点当前值（缺省回落 default）
+        var values = new List<object?>();
+        foreach (var p in json.Params)
+            values.Add(ctx.Params.TryGetValue(p.Name, out var v) ? v : ConvertDefault(p.Default, p.Type));
+
+        var (outImages, outClouds) = native.Run(values, images, clouds);
+
+        // 输出分发：image 端口依次消费返回图像，cloud 端口依次消费返回点云
+        var dict = new Dictionary<string, object?>();
+        int imgIdx = 0, cloudIdx = 0;
+        foreach (var port in json.Outputs)
+        {
+            if (ParseType(port.Type) == PortType.Cloud)
+            {
+                if (cloudIdx >= outClouds.Count) throw new Exception($"输出「{port.Name}」需要点云，但算子只返回 {outClouds.Count} 个");
+                dict[port.Name] = outClouds[cloudIdx++];
+            }
+            else
+            {
+                if (imgIdx >= outImages.Count) throw new Exception($"输出「{port.Name}」需要图像，但算子只返回 {outImages.Count} 个");
+                dict[port.Name] = outImages[imgIdx++];
+            }
+        }
+        return dict;
     }
 
     private static Dictionary<string, object?> Invoke(NodeJson json, MethodInfo method, Type type, NodeRunContext ctx)

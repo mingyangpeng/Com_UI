@@ -230,37 +230,71 @@ public static class GenericAlgoRunner
         return cur;
     }
 
-    // ==================== native 运行时（C 导出函数，基本类型） ====================
+    // ==================== native 运行时（C++ DLL + 统一 C ABI，宿主按 JSON 自动 marshal） ====================
 
     private static AlgoCommand CreateNative(AlgoJsonDescriptor json, string folder, IBus bus, LogService log)
     {
         var dllPath = Path.Combine(folder, json.Assembly);
         if (!File.Exists(dllPath))
             throw new Exception($"找不到原生库 {json.Assembly}");
+        if (string.IsNullOrWhiteSpace(json.Method))
+            throw new Exception("runtime=native 需要 method");
 
-        // C 导出函数约定：参数为 (double/int/string 值参..., 输出缓冲指针...)，返回 int 错误码（0 成功）
+        // 加载时按 JSON 自动生成调用壳（统一 C ABI：参数/图像/点云 marshal + algo_free 释放约定）
+        var invoker = new ComUI.Sdk.Native.NativeAlgoInvoker(dllPath, json.Method);
+
         return new AlgoCommand
         {
             Id = json.Plugin.Id + ".run",
             Title = json.Plugin.Name,
             Params = json.Params.Count == 0 ? null : json.Params.Select(ToSdkParam).ToList(),
-            Execute = ctx => Task.Run(() =>
-            {
-                var lib = NativeLibrary.Load(dllPath);
-                try
-                {
-                    var export = NativeLibrary.GetExport(lib, json.Method!);
-                    throw new Exception(
-                        "native 运行时当前仅支持入口在 comdll/common 约定下的简单签名；" +
-                        "复杂原生算法请包一层 C# 壳（IAlgoPlugin）或提供 C 接口文档以扩展执行器。");
-                    // M2+ 按需扩展：按 json.Args 声明逐个 Marshal 基本类型并调用
-                    _ = export;
-                }
-                finally
-                {
-                    NativeLibrary.Free(lib);
-                }
-            }),
+            Execute = ctx => Task.Run(() => InvokeNative(json, invoker, bus, log, ctx)),
         };
+    }
+
+    /// <summary>native 执行：参数按声明顺序取值；总线输入按主题取最新帧（图像/点云）；
+    /// 输出按声明顺序发布（from 指定 image/cloud，缺省 image——第 N 个同 kind 输出取第 N 个返回值）。</summary>
+    private static void InvokeNative(AlgoJsonDescriptor json, ComUI.Sdk.Native.NativeAlgoInvoker invoker,
+        IBus bus, LogService log, IAlgoRunContext ctx)
+    {
+        // 参数（按 JSON 声明顺序；缺省回落 default）
+        var values = new List<object?>();
+        foreach (var p in json.Params)
+        {
+            var v = TryGetParamValue(json, ctx, p.Name);
+            values.Add(v ?? ConvertDefault(p));
+        }
+
+        // 总线输入：按主题取最新帧（先按图像试，再按点云）
+        var images = new List<ImagePayload>();
+        var clouds = new List<CloudPayload>();
+        foreach (var input in json.Inputs)
+        {
+            if (bus.TryGetLatest<ImagePayload>(input.Topic, out var img) && img is not null) { images.Add(img); continue; }
+            if (bus.TryGetLatest<CloudPayload>(input.Topic, out var c) && c is not null) { clouds.Add(c); continue; }
+            throw new Exception($"输入「{input.Name}」无数据：主题 {input.Topic} 还没有图像/点云帧");
+        }
+
+        var (outImages, outClouds) = invoker.Run(values, images, clouds);
+
+        // 输出发布：from = "image" / "cloud"（缺省 image）；同 kind 按声明顺序依次取
+        int imgIdx = 0, cloudIdx = 0;
+        foreach (var output in json.Outputs)
+        {
+            var kind = (output.From ?? "image").Trim().ToLowerInvariant();
+            object? value;
+            if (kind == "cloud")
+            {
+                if (cloudIdx >= outClouds.Count) { log.Warn($"[{json.Plugin.Id}] 输出 {output.From} 无对应点云，跳过发布"); continue; }
+                value = outClouds[cloudIdx++];
+            }
+            else
+            {
+                if (imgIdx >= outImages.Count) { log.Warn($"[{json.Plugin.Id}] 输出 {output.From} 无对应图像，跳过发布"); continue; }
+                value = outImages[imgIdx++];
+            }
+            bus.Publish(output.Topic, value);
+            log.Info($"[{json.Plugin.Id}] 已发布 {output.From} → {output.Topic}");
+        }
     }
 }

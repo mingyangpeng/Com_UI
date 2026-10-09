@@ -166,7 +166,7 @@ public sealed class DemoView : UserControl
 ```
 
 参数类型：`number / int / text / bool / enum / path`。执行在后台线程，宿主提供取消/进度。
-需要自定义生命周期/命令注册时才手写 `IAlgoPlugin`（`GetCommands` 返回 `AlgoCommand` 列表，显示在「算法配方」侧边栏）。
+需要自定义生命周期/命令注册时才手写 `IAlgoPlugin`（`GetCommands` 返回 `AlgoCommand` 列表，显示在「算法配方」侧边栏）。`runtime: "native"`（C++ DLL）已支持即插即用——统一 C ABI 见 [THIRD_PARTY_OPS.md §5.5](THIRD_PARTY_OPS.md#55-统一-c-abi调用契约v1)。
 
 ## 5. 节点算子（流水线节点）
 
