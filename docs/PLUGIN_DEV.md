@@ -142,7 +142,7 @@ public sealed class DemoView : UserControl
 | `AlgoLocked` | `algo/locked` | `string` | 算法锁定状态切换 |
 | `PanelActivate` | `ui/activate-panel` | `string` | 请求打开/聚焦某窗口面板（载荷=面板 Id） |
 
-**载荷约定**：`ImagePayload{Width,Height,PixelsBgra,Source,Id}`；`CloudPayload{Id,Points(XYZ 三元组),ColorsRgb?,Count,Source}`。
+**载荷契约（已定案）**：图像 = **OpenCV 模式**（`ImagePayload` ≡ `cv::Mat(CV_8UC4)`：BGRA 交错、紧排列）；点云 = **PCL 模式**（`CloudPayload` ≡ `PointCloud<PointXYZRGB>` 的 SoA 展开）。字段与转换代码见 [THIRD_PARTY_OPS.md §4](THIRD_PARTY_OPS.md#4-数据契约图像--opencv-模式点云--pcl-模式)。
 **数组不可变约定**：发布后的载荷数组视为只读（下游零拷贝引用共享，如快照/多实体）。
 
 ## 4. 算法插件（JSON 声明，推荐）
@@ -171,6 +171,7 @@ public sealed class DemoView : UserControl
 ## 5. 节点算子（流水线节点）
 
 同一 DLL 配 `*.node.json` 即注册进「算子库」（`NodeJsonRegistry` 启动/F5 自动扫描）：
+> 完整字段规范、方法签名绑定规则、数据契约与红线（面向第三方算法厂商）见 [THIRD_PARTY_OPS.md](THIRD_PARTY_OPS.md)；本节只给最小示例。
 
 ```jsonc
 {

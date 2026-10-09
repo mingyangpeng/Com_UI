@@ -87,13 +87,16 @@ public interface IBus
 /// <summary>主题快照信息。</summary>
 public sealed record BusTopicInfo(string Topic, string? LatestType, long FrameCount, DateTime? LastPublish);
 
-/// <summary>占位图像帧（BGRA32）。正式使用时请替换为算法 IO 接口 DLL 中的图像类型。</summary>
+/// <summary>图像帧载荷。**契约 = OpenCV 模式**：布局与 cv::Mat(CV_8UC4) 完全一致——
+/// 行主序、逐像素交错 B,G,R,A、**紧排列（step = Width×4，无行对齐填充）**。
+/// cv::Mat 连续（isContinuous）时 data 可整块 memcpy；ROI/非连续 Mat 需逐行拷贝或先 clone()；
+/// 3 通道 BGR Mat 先 cvtColor 到 BGRA。详见 docs/THIRD_PARTY_OPS.md。</summary>
 public sealed class ImagePayload
 {
     public int Width { get; init; }
     public int Height { get; init; }
 
-    /// <summary>BGRA32 像素数据，长度 = Width * Height * 4。</summary>
+    /// <summary>BGRA32 像素数据（= cv::Mat CV_8UC4 data），长度 = Width * Height * 4，紧排列。</summary>
     public byte[] PixelsBgra { get; init; } = Array.Empty<byte>();
 
     /// <summary>图像来源说明，如 "拼接结果"。</summary>
@@ -103,16 +106,19 @@ public sealed class ImagePayload
     public string? Id { get; init; }
 }
 
-/// <summary>占位点云帧。正式使用时请替换为算法 IO 接口 DLL 中的点云类型。</summary>
+/// <summary>点云帧载荷。**契约 = PCL 模式**：数据为 PCL PointCloud&lt;PointXYZRGB&gt; 的 SoA 展开——
+/// Points = [x0,y0,z0, x1,y1,z1, …]（float，长度 = Count×3）；
+/// ColorsRgb = [r0,g0,b0, r1,g1,b1, …]（byte，长度 = Count×3，可选）。
+/// PCL 侧逐点拷 x/y/z，颜色从 packed rgb（uint32：r&lt;&lt;16|g&lt;&lt;8|b）拆三字节。详见 docs/THIRD_PARTY_OPS.md。</summary>
 public sealed class CloudPayload
 {
     /// <summary>点云实体 Id（查看器按它做多实体管理：同 Id 重发=更新；空则落 "点云"）。</summary>
     public string? Id { get; init; }
 
-    /// <summary>XYZ 坐标，长度 = Count * 3。</summary>
+    /// <summary>XYZ 坐标（SoA：x,y,z 连续 float），长度 = Count * 3。</summary>
     public float[] Points { get; init; } = Array.Empty<float>();
 
-    /// <summary>逐点 RGB（可选，长度 = Count * 3）；为空时由查看器按高度伪彩上色。</summary>
+    /// <summary>逐点 RGB（SoA：r,g,b 连续 byte），长度 = Count * 3；为空时由查看器按高度伪彩上色。</summary>
     public byte[]? ColorsRgb { get; init; }
 
     public int Count { get; init; }
