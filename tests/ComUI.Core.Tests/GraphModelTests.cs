@@ -192,4 +192,30 @@ public class GraphModelTests
         g.RemoveNode(a.Id);
         Assert.Empty(g.Connections);
     }
+
+    [Fact]
+    public void NodeSize_RoundTripsThroughJson()
+    {
+        // 卡片拉伸宽度（ComfyUI 式：仅宽度可拉，高度恒为内容自适应）随算法 JSON
+        // 保存/加载/复制粘贴往返；未拉伸 = null
+        var g = new GraphDocument();
+        var n = Node("test.a", 10, 20);
+        n.Width = 360;
+        g.AddNode(n);
+        var json = g.Serialize("尺寸测试");
+
+        var g2 = new GraphDocument();
+        g2.LoadFromJson(json);
+        var n2 = Assert.Single(g2.Nodes);
+        Assert.Equal(360, n2.Width);
+
+        var frag = g.CopyNodeToJson(n.Id);
+        var g3 = new GraphDocument();
+        var pasted = g3.PasteNode(frag, 0, 0);
+        Assert.NotNull(pasted);
+        Assert.Equal(360, pasted!.Width);
+
+        var n4 = Node("test.b", 0, 0);
+        Assert.Null(n4.Width);
+    }
 }

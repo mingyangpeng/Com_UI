@@ -25,12 +25,14 @@ namespace ComUI.Plugin.NodeGraph;
 /// 节点图编辑器（ComfyUI 式）：
 /// 节点卡片可拖动、参数内嵌运行时可改；端口拖拽连线（贝塞尔曲线，按类型着色），
 /// 从已连线的输入端口拖出=断开重连；画布支持平移与滚轮缩放；
-/// 修改参数/连线后自动按拓扑序重跑整张图，结果经数据总线发布。
+/// 卡片右下角把手拖拽拉伸宽度（ComfyUI 式：高度恒为内容自适应、预览随宽放大、字号不变；持久化 Width）；
+/// 修改参数/连线后自动按拓扑序重跑整图，结果经数据总线发布。
 /// </summary>
 public sealed class NodeEditorView : UserControl, IDisposable
 {
-    // ===== 卡片布局常量（端口中心位置按此精确计算） =====
+        // ===== 卡片布局常量（端口中心位置按此精确计算） =====
     private const double CardW = 210, HeaderH = 28, BodyPad = 8, RowH = 24, ParamH = 30, PortD = 12;
+    private const double CloudPreviewRatio = 0.75;   // 3D 预览高/宽比（无图像纵横比可循，取 4:3 视口）
     private const string DragFormat = "NodeDefId";
     private const string PipelineFormat = "PipelinePath";
 
@@ -61,8 +63,9 @@ public sealed class NodeEditorView : UserControl, IDisposable
     private readonly Dictionary<string, Button> _previewExportButtons = new();
     private readonly Dictionary<string, TextBox> _previewNameBoxes = new();   // draw 卡片变量名框（默认名跟随输入）
 
-    private enum DragMode { None, Pan, Node, Connect }
+    private enum DragMode { None, Pan, Node, Connect, Resize }
     private DragMode _mode = DragMode.None;
+    private double _resizeStartW;   // Resize 按压时的卡片宽（增量基于起点；ComfyUI 式仅宽度可拉）
     private Point _lastScreen;
     private string? _dragNode;
     private (string Node, string Port, PortType Type)? _pending;
@@ -344,6 +347,17 @@ public sealed class NodeEditorView : UserControl, IDisposable
                 RedrawEdges();
                 break;
             }
+            case DragMode.Resize when _dragNode is not null:
+            {
+                var p = e.GetPosition(this);
+                // ComfyUI 式拉伸：仅宽度（行横向跟随变宽、预览随宽放大、字号不变）；
+                // 高度恒为内容自适应，不存在独立拉高 → 永无底部空白。增量始终基于按压起点
+                double w = Math.Clamp(_resizeStartW + (p.X - _lastScreen.X) / _scaleT.ScaleX, CardW, 900);
+                if (_graph.FindNode(_dragNode) is { } rn) rn.Width = w;
+                if (_cards.TryGetValue(_dragNode, out var rcard)) rcard.Width = w;
+                RedrawEdges();   // 输出端口随宽度右移，连线即时跟随
+                break;   // 不更新 _lastScreen：增量始终基于按压起点
+            }
             case DragMode.Connect:
             {
                 var w = e.GetPosition(_world);
@@ -515,7 +529,11 @@ public sealed class NodeEditorView : UserControl, IDisposable
         var dbl = new DoubleClickDetector();
         header.PointerPressed += (_, e) =>
         {
-            if (_readOnly) return;   // 锁定算法只读：不拖动/不删除/不改名
+            if (_readOnly)
+            {
+                _log("算法已锁定（只读），解锁或复制副本后才能拖动/编辑");
+                return;   // 锁定算法只读：不拖动/不删除/不改名
+            }
             var props = e.GetCurrentPoint(header).Properties;
             if (props.IsRightButtonPressed)
             {
@@ -594,12 +612,22 @@ public sealed class NodeEditorView : UserControl, IDisposable
                 previewBorder.Child = new TextBlock
                 {
                     Text = "等待点云输入…", FontSize = 11, Foreground = Brushes.DimGray,
-                    HorizontalAlignment = HorizontalAlignment.Center, Margin = new Thickness(0, 40, 0, 40),
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                };
+                // 3D 预览无图像纵横比可循：高 = 宽 × CloudPreviewRatio——宽随卡片拉伸时预览区
+                // 对角放大（与 2D 图像"高=宽/纵横比"行为对齐）；GL 视口随控件 SizeChanged 自适应
+                previewBorder.SizeChanged += (_, e) =>
+                {
+                    if (e.NewSize.Width > 0)
+                        previewBorder.Height = e.NewSize.Width * CloudPreviewRatio;
                 };
             }
             else
             {
-                var previewImage = new Image { Height = 120, Stretch = Stretch.Uniform, IsVisible = false };
+                // 2D 预览不设固定高：Stretch=Uniform 在定宽约束下自动"宽=卡片宽、高=宽/纵横比"
+                // ——拉伸卡片宽度即放大预览（ComfyUI 式），卡片高度随内容自适应
+                var previewImage = new Image { Stretch = Stretch.Uniform, IsVisible = false };
                 previewBorder.Child = previewImage;
                 slot.Img = previewImage;
             }
@@ -625,7 +653,6 @@ public sealed class NodeEditorView : UserControl, IDisposable
             _previewNameBoxes[node.Id] = nameBox;
         }
 
-        int row = 0;
         foreach (var port in def.Inputs)
         {
             body.Children.Add(PortRow(node, port, isInput: true));
@@ -665,15 +692,49 @@ public sealed class NodeEditorView : UserControl, IDisposable
 
         var card = new Border
         {
-            Width = CardW,
+            Width = node.Width ?? CardW,   // 角把手拉伸（默认 CardW；高度恒为内容自适应）
             Background = new SolidColorBrush(Color.FromRgb(0x26, 0x26, 0x29)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(0x3F, 0x3F, 0x44)),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(6),
             ClipToBounds = false,
             Focusable = true,   // 选中后获得键盘焦点（Del 删除可达）
-            Child = new StackPanel { Children = { header, body } },
         };
+        var content = new StackPanel { Children = { header, body } };
+        var overlay = new Grid();
+        overlay.Children.Add(content);
+
+        // 右下角拉伸手柄（ComfyUI 式）：拖拽改卡片宽度，高度随内容自适应
+        var grip = new Border
+        {
+            Width = 14, Height = 14,
+            Background = Brushes.Transparent,   // 透明可命中
+            Cursor = new Cursor(StandardCursorType.SizeWestEast),
+            HorizontalAlignment = HorizontalAlignment.Right,
+            VerticalAlignment = VerticalAlignment.Bottom,
+            Child = new TextBlock
+            {
+                Text = "◢", FontSize = 9,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x6E, 0x6E, 0x76)),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            },
+        };
+        ToolTip.SetTip(grip, "拖动调整卡片宽度（预览随宽放大，高度自适应）");
+        grip.PointerPressed += (_, e) =>
+        {
+            if (_readOnly) return;   // 锁定算法只读：不可拉伸
+            if (!e.GetCurrentPoint(grip).Properties.IsLeftButtonPressed) return;
+            _mode = DragMode.Resize;
+            _dragNode = node.Id;
+            _resizeStartW = card.Width;
+            _lastScreen = e.GetPosition(this);
+            e.Pointer.Capture(this);
+            e.Handled = true;
+            SelectCard(node.Id);
+        };
+        overlay.Children.Add(grip);
+        card.Child = overlay;
         // 任意位置按下=选中（handledEventsToo：头部把 Pressed 标记 Handled 用于拖动/改名，这里也要收到）
         card.AddHandler(PointerPressedEvent, (_, e) =>
         {
@@ -1092,7 +1153,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
         var def = NodeDefs.Map[n.DefId];
         int idx = def.Outputs.ToList().FindIndex(p => p.Name == port);
         int inCount = def.Inputs.Length;
-        return new Point(n.X + CardW - 15, n.Y + HeaderH + BodyPad + (inCount + idx + 0.5) * RowH);
+        return new Point(n.X + (n.Width ?? CardW) - 15, n.Y + HeaderH + BodyPad + (inCount + idx + 0.5) * RowH);
     }
 
     private Point InPortCenter(NodeInstance n, string port)

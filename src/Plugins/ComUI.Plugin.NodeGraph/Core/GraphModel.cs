@@ -75,6 +75,8 @@ public sealed class NodeInstance
     public string? Title { get; set; }
     public double X { get; set; }
     public double Y { get; set; }
+    /// <summary>卡片显示宽度（ComfyUI 式角把手拉伸，仅宽度；高度恒为内容自适应。null = 默认 CardW）。</summary>
+    public double? Width { get; set; }
     public Dictionary<string, object?> Params { get; } = new();
     public NodeStatus Status { get; set; } = NodeStatus.Idle;
     public string? Error { get; set; }
@@ -161,6 +163,7 @@ public sealed class Connection
         public string? Title { get; set; }
         public double X { get; set; }
         public double Y { get; set; }
+        public double? Width { get; set; }
         public Dictionary<string, JsonElement>? Params { get; set; }
     }
 
@@ -181,7 +184,7 @@ public sealed class Connection
             Locked = Locked,
             Nodes = Nodes.Select(n => new PipelineNode
             {
-                Id = n.Id, Def = n.DefId, Title = n.Title, X = n.X, Y = n.Y,
+                Id = n.Id, Def = n.DefId, Title = n.Title, X = n.X, Y = n.Y, Width = n.Width,
                 Params = new Dictionary<string, JsonElement>(
                     n.Params.Select(kv => new KeyValuePair<string, JsonElement>(kv.Key, JsonValueOf(kv.Value)))),
             }).ToList(),
@@ -220,7 +223,7 @@ public sealed class Connection
         foreach (var n in doc.Nodes)
         {
             if (!NodeDefs.Map.ContainsKey(n.Def)) continue;
-            var inst = new NodeInstance { DefId = n.Def, X = n.X, Y = n.Y, Title = n.Title };
+            var inst = new NodeInstance { DefId = n.Def, X = n.X, Y = n.Y, Title = n.Title, Width = n.Width };
             if (n.Params is not null)
                 foreach (var kv in n.Params)
                     inst.Params[kv.Key] = JsonToObject(kv.Value);
@@ -246,7 +249,7 @@ public sealed class Connection
             {
                 new PipelineNode
                 {
-                    Id = n.Id, Def = n.DefId, Title = n.Title, X = n.X, Y = n.Y,
+                    Id = n.Id, Def = n.DefId, Title = n.Title, X = n.X, Y = n.Y, Width = n.Width,
                     Params = new Dictionary<string, JsonElement>(
                         n.Params.Select(kv => new KeyValuePair<string, JsonElement>(kv.Key, JsonValueOf(kv.Value)))),
                 },
@@ -264,7 +267,7 @@ public sealed class Connection
         });
         var n = doc?.Nodes.FirstOrDefault();
         if (n is null || !NodeDefs.Map.ContainsKey(n.Def)) return null;
-        var inst = new NodeInstance { DefId = n.Def, X = n.X + dx, Y = n.Y + dy, Title = n.Title };
+        var inst = new NodeInstance { DefId = n.Def, X = n.X + dx, Y = n.Y + dy, Title = n.Title, Width = n.Width };
         if (n.Params is not null)
             foreach (var kv in n.Params)
                 inst.Params[kv.Key] = JsonToObject(kv.Value);
@@ -294,7 +297,7 @@ public sealed class Connection
             if (!NodeDefs.Map.ContainsKey(n.Def)) continue; // 算子未注册则跳过
             var newId = Guid.NewGuid().ToString("N")[..8];
             idMap[n.Id] = newId;
-            var inst = new NodeInstance { DefId = n.Def, X = n.X + offX, Y = n.Y + offY, Title = n.Title };
+            var inst = new NodeInstance { DefId = n.Def, X = n.X + offX, Y = n.Y + offY, Title = n.Title, Width = n.Width };
             if (n.Params is not null)
                 foreach (var kv in n.Params)
                     inst.Params[kv.Key] = JsonToObject(kv.Value);

@@ -301,7 +301,7 @@ public sealed class NodeLibraryView : UserControl, IDisposable
     private Control OperatorRow(NodeDef def)
     {
         var defId = def.Id;
-        var item = MakeRow(CategoryColor(def.Category), def.Name, def.Id);
+        var item = MakeRow(CategoryColor(def.Category), def.Name);
 
         Point? pressPoint = null;
         bool moving = false;
@@ -348,43 +348,46 @@ public sealed class NodeLibraryView : UserControl, IDisposable
         return item;
     }
 
-    private static Border MakeRow(Color dotColor, string text, string tooltip)
+    /// <summary>算子行：固定行高 28，色点 + 名称（算子 Id 在 ToolTip）。</summary>
+    private Border MakeRow(Color dotColor, string text)
     {
-        var row = new Border
+        var label = new TextBlock
+        {
+            Text = text,
+            FontSize = 12.5,
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        };
+
+        var content = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(14, 0, 0, 0),
+            Children =
+            {
+                new Border
+                {
+                    Width = 9,
+                    Height = 9,
+                    CornerRadius = new CornerRadius(2),
+                    Background = new SolidColorBrush(dotColor),
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+                label,
+            },
+        };
+
+        return new Border
         {
             Height = 28,
             Background = Brushes.Transparent,
             Margin = new Thickness(8, 0, 8, 0),
             CornerRadius = new CornerRadius(4),
             Cursor = new Cursor(StandardCursorType.Hand),
-            Child = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 8,
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(14, 0, 0, 0),
-                Children =
-                {
-                    new Border
-                    {
-                        Width = 9,
-                        Height = 9,
-                        CornerRadius = new CornerRadius(2),
-                        Background = new SolidColorBrush(dotColor),
-                        VerticalAlignment = VerticalAlignment.Center,
-                    },
-                    new TextBlock
-                    {
-                        Text = text,
-                        FontSize = 12.5,
-                        VerticalAlignment = VerticalAlignment.Center,
-                        TextTrimming = TextTrimming.CharacterEllipsis,
-                    },
-                },
-            },
+            Child = content,
         };
-        ToolTip.SetTip(row, tooltip);
-        return row;
     }
 
     private static void ResetItem(Border item) =>

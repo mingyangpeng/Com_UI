@@ -1,0 +1,34 @@
+{
+  "node": {
+    "id": "alg.image2d.gamma",
+    "name": "Gamma 校正",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "图像 Gamma 非线性校正"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiGamma",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "gamma",
+      "label": "Gamma 值",
+      "type": "number",
+      "default": 1.0,
+      "min": 0.1,
+      "max": 5.0
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ]
+}
