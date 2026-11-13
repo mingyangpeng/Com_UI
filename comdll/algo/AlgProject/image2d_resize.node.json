@@ -1,0 +1,64 @@
+{
+  "node": {
+    "id": "alg.image2d.resize",
+    "name": "缩放",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "缩放到目标尺寸"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiResize",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "out_width",
+      "label": "目标宽",
+      "type": "int",
+      "default": 640,
+      "min": 1,
+      "max": 10000
+    },
+    {
+      "name": "out_height",
+      "label": "目标高",
+      "type": "int",
+      "default": 480,
+      "min": 1,
+      "max": 10000
+    },
+    {
+      "name": "interpolation",
+      "label": "插值(0近邻/1线性/2立方/3面积/4Lanczos)",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 4
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

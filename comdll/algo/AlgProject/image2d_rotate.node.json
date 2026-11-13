@@ -1,0 +1,64 @@
+{
+  "node": {
+    "id": "alg.image2d.rotate",
+    "name": "旋转",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "绕图像中心旋转并缩放（输出同尺寸）"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiRotate",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "angle",
+      "label": "角度(度)",
+      "type": "number",
+      "default": 0,
+      "min": -360,
+      "max": 360
+    },
+    {
+      "name": "scale",
+      "label": "缩放",
+      "type": "number",
+      "default": 1,
+      "min": 0.01,
+      "max": 10
+    },
+    {
+      "name": "interpolation",
+      "label": "插值",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 4
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

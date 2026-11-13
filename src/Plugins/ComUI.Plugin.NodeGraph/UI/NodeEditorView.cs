@@ -15,6 +15,7 @@ using Avalonia.Layout;
 using Avalonia.Media;
 using Avalonia.Media.Imaging;
 using Avalonia.Platform;
+using Avalonia.Platform.Storage;
 using Avalonia.Threading;
 using ComUI.Sdk;
 using ComUI.Sdk.Ui;
@@ -71,6 +72,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
     private (string Node, string Port, PortType Type)? _pending;
     private Path? _tempEdge;
     private string? _selectedNode;   // 选中卡片（Del 删除目标）
+    private Connection? _selectedEdge;   // 选中的连线（Del 删除目标；点画布/卡片取消）
     private readonly Dictionary<(string NodeId, string Port, bool Input), Ellipse> _portDots = new();   // 端口点实际控件（连线锚点以其布局位置为准）
     private bool _edgeLayoutDirty;   // 锚点在布局完成前用了公式兜底 → 布局完成后补一次重绘
     private string? _clipNode;       // 卡片剪贴板（Ctrl+C 的节点片段 JSON）
@@ -137,6 +139,18 @@ public sealed class NodeEditorView : UserControl, IDisposable
             {
                 e.Handled = true;
                 _ = SaveOrCopyAsync();
+            }
+            else if (e.Key == Key.Delete && !e.Handled && !_readOnly && _selectedEdge is { } edge)
+            {
+                e.Handled = true;
+                var fromNode = _graph.FindNode(edge.FromNode);
+                var toNode = _graph.FindNode(edge.ToNode);
+                _graph.Connections.RemoveAll(c => ReferenceEquals(c, edge));
+                _selectedEdge = null;
+                RedrawEdges();
+                ScheduleAutoRun();
+                if (fromNode is not null && toNode is not null)
+                    _log($"删除连线「{NodeDefs.Map[fromNode.DefId].Name} → {NodeDefs.Map[toNode.DefId].Name}」");
             }
             else if (e.Key == Key.Delete && !e.Handled && !_readOnly && _selectedNode is { } sel)
             {
@@ -254,6 +268,10 @@ public sealed class NodeEditorView : UserControl, IDisposable
         };
         bar.Children.Add(clearBtn);
 
+        var exportCppBtn = Ghost("⬇ 导出 C++");
+        exportCppBtn.Click += (_, _) => _ = ExportCppAsync();
+        bar.Children.Add(exportCppBtn);
+
         bar.Children.Add(new TextBlock
         {
             Text = "从算子库拖入/单击建节点 · 拖动端口连线（输出可分叉多路） · 单击选中卡片 · Del/右键删除 · 拖动已连输入=换源 · 空白处拖动平移 · 滚轮缩放",
@@ -291,6 +309,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
     private void EditorPressed(object? sender, PointerPressedEventArgs e)
     {
         SelectCard(null);
+        SelectEdge(null);   // 点画布空白同时取消连线选中（内部去重，无选中时零开销）
         var props = e.GetCurrentPoint(_editor).Properties;
         // 仅空白画布（world/_editor 自身）触发平移；节点、滑块等内部 Border 不得抢捕获
         bool onBackground = ReferenceEquals(e.Source, _world) || ReferenceEquals(e.Source, _editor) || ReferenceEquals(e.Source, _edges);
@@ -1111,6 +1130,19 @@ public sealed class NodeEditorView : UserControl, IDisposable
             card.BorderBrush = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF));
     }
 
+    /// <summary>选中/取消选中连线（高亮 + Del 删除目标切换；与节点选中互斥）。</summary>
+    private void SelectEdge(Connection? edge)
+    {
+        if (ReferenceEquals(_selectedEdge, edge)) return;
+        _selectedEdge = edge;
+        if (edge is not null)
+        {
+            SelectCard(null);   // 选中连线 = 取消节点选中（互斥，Del 目标唯一）
+            _log("已选中连线（Del 删除）");
+        }
+        RedrawEdges();   // 高亮垫底线随重绘恢复
+    }
+
     private void DeleteNode(string nodeId)
     {
         var node = _graph.FindNode(nodeId);
@@ -1186,7 +1218,25 @@ public sealed class NodeEditorView : UserControl, IDisposable
             var p0 = OutPortCenter(from, c.FromPort);
             var p1 = InPortCenter(to, c.ToPort);
             var type = NodeDefs.Map[from.DefId].Outputs.First(o => o.Name == c.FromPort).Type;
-            _edges.Children.Add(EdgePath(p0, p1, PortBrush(type)));
+            var path = EdgePath(p0, p1, PortBrush(type));
+            // 命中与选中共用：宽透明描边扩大点击区，窄实线显示颜色（选中之上的高亮在 HitEdge 重绘）
+            path.Tag = c;
+            path.StrokeThickness = 2.2;
+            path.Cursor = new Cursor(StandardCursorType.Hand);
+            path.PointerPressed += (_, e) =>
+            {
+                if (!e.GetCurrentPoint(path).Properties.IsLeftButtonPressed) return;
+                e.Handled = true;
+                SelectEdge(c);
+            };
+            _edges.Children.Add(path);
+            if (ReferenceEquals(c, _selectedEdge))
+            {
+                // 选中高亮：白色宽线垫底 + 原色线叠上（保持类型色可辨）
+                var halo = EdgePath(p0, p1, new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xEC)));
+                halo.StrokeThickness = 5.5;
+                _edges.Children.Add(halo);
+            }
         }
         _edges.InvalidateVisual();
         RefreshPreviewNames();   // 连接变化 → 未自定义的变量名跟随新输入源
@@ -1207,7 +1257,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
         }
     }
 
-    private static Path EdgePath(Point p0, Point p1, IBrush brush)
+    private static Path EdgePath(Point p0, Point p1, IBrush brush, double thickness = 2.2)
     {
         // 控制点距离随水平距离自适应；目标在源左侧（回连）时加大弯曲避开卡片
         double dx = Math.Clamp(Math.Abs(p1.X - p0.X) * 0.55, 30, 160);
@@ -1215,7 +1265,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
         return new Path
         {
             Stroke = brush,
-            StrokeThickness = 2.2,
+            StrokeThickness = thickness,
             Data = new PathGeometry
             {
                 Figures =
@@ -1460,9 +1510,40 @@ public sealed class NodeEditorView : UserControl, IDisposable
         }
     }
 
-    /// <summary>从算法文件完整加载（新页面打开场景）：替换当前图，保留连线与参数。</summary>
-    public void LoadGraphFile(string path)
+    /// <summary>「⬇ 导出 C++」：把当前图导出为完整可编译的 C++ 控制台工程
+    /// （main.cpp + 算子真实源码副本 + CMakeLists；native 算子直接编译进可执行文件，
+    /// 无源码的节点生成 TODO 桩）。选文件夹落盘。</summary>
+    private async Task ExportCppAsync()
     {
+        if (_graph.Nodes.Count == 0) { _log("当前页面是空的，没有可导出的内容"); return; }
+        var storage = TopLevel.GetTopLevel(this)?.StorageProvider;
+        if (storage is null) { _log("无法打开文件夹选择对话框"); return; }
+        var folder = await storage.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "选择导出 C++ 工程的文件夹",
+            AllowMultiple = false,
+        });
+        if (folder.Count == 0) return;
+        var dir = folder[0].TryGetLocalPath();
+        if (string.IsNullOrEmpty(dir)) { _log("所选文件夹不是本地路径"); return; }
+
+        var name = LoadedPath is not null
+            ? IOPath.GetFileNameWithoutExtension(LoadedPath).Replace(".pipeline", "")
+            : "pipeline";
+        try
+        {
+            var err = CppExporter.Export(_graph, dir, name);
+            if (err is not null) { _log($"导出失败：{err}"); return; }
+            _log($"已导出 C++ 工程 → {dir}（main.cpp + 算子源码 + CMakeLists.txt，CMake 直接构建）");
+        }
+        catch (Exception ex)
+        {
+            _log($"导出失败: {ex.Message}");
+        }
+    }
+
+    /// <summary>从算法文件完整加载（新页面打开场景）：替换当前图，保留连线与参数。</summary>
+    public void LoadGraphFile(string path)    {
         _graph.LoadFromJson(File.ReadAllText(path));
         LoadedPath = path;
         SetReadOnly(_graph.Locked);   // 锁定的算法以只读打开

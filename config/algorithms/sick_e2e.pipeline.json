@@ -1,0 +1,35 @@
+{
+  "Name": "sick_e2e",
+  "Locked": false,
+  "Nodes": [
+    {
+      "Id": "sicksrc01",
+      "Def": "alg.point3d.read_sick",
+      "Title": null,
+      "X": 60,
+      "Y": 60,
+      "Params": {
+        "folder": "Z:\\ScanImage\\3D",
+        "step": 4
+      }
+    },
+    {
+      "Id": "voxel01",
+      "Def": "alg.point3d.voxel_downsample",
+      "Title": null,
+      "X": 360,
+      "Y": 60,
+      "Params": {
+        "leaf_size": 0.02
+      }
+    }
+  ],
+  "Connections": [
+    {
+      "From": "sicksrc01",
+      "FromPort": "点云",
+      "To": "voxel01",
+      "ToPort": "输入"
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+{
+  "node": {
+    "id": "alg.point3d.profile",
+    "name": "轮廓截面量测",
+    "group": "3D 点云",
+    "category": "测量",
+    "description": "沿 XY 线段提取 z 剖面（带内投影+弧长分格中位数），输出剖面点云与台阶落差 max_step，统计并入消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiProfile",
+  "inputs": [
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "x0",
+      "label": "起点X(mm)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "y0",
+      "label": "起点Y(mm)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "x1",
+      "label": "终点X(mm)",
+      "type": "number",
+      "default": 1.0
+    },
+    {
+      "name": "y1",
+      "label": "终点Y(mm)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "band",
+      "label": "带半宽(mm)",
+      "type": "number",
+      "default": 0.2,
+      "min": 0.01
+    },
+    {
+      "name": "bin_size",
+      "label": "弧长分格(mm)",
+      "type": "number",
+      "default": 0.1,
+      "min": 0.01
+    }
+  ],
+  "outputs": [
+    {
+      "name": "剖面点云",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/tools/Point3DAlg_Profile.h",
+      "src/Point3DAlg/tools/Point3DAlg_Profile.cpp",
+      "src/Point3DAlg/tools/Point3DAlg_FitUtil.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools"
+    ]
+  }
+}

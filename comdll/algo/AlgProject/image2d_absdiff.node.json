@@ -1,0 +1,43 @@
+{
+  "node": {
+    "id": "alg.image2d.absdiff",
+    "name": "批板差分",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "基准板与待检板逐像素差的绝对值（检出差异区域）"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiAbsDiff",
+  "inputs": [
+    {
+      "name": "基准板",
+      "type": "image"
+    },
+    {
+      "name": "待检板",
+      "type": "image"
+    }
+  ],
+  "params": [],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

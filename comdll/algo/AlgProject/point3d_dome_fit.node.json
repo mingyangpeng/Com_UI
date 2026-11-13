@@ -1,0 +1,70 @@
+{
+  "node": {
+    "id": "alg.point3d.dome_fit",
+    "name": "拱形球顶拟合(bump高度)",
+    "group": "3D 点云",
+    "category": "测量",
+    "description": "拟合基面上拱形球顶 bump 的高度：稳健基面→欧式聚类→球拟合，输出每 bump 一点（z=高度mm），统计并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiDomeFit",
+  "inputs": [
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "height_threshold",
+      "label": "bump判定高度(mm,相对基面)",
+      "type": "number",
+      "default": 0.02,
+      "min": 0.0
+    },
+    {
+      "name": "cluster_tolerance",
+      "label": "聚类连通距离(mm)",
+      "type": "number",
+      "default": 0.12,
+      "min": 0.001,
+      "max": 5.0
+    },
+    {
+      "name": "min_points",
+      "label": "每bump最少点数",
+      "type": "int",
+      "default": 8,
+      "min": 4
+    },
+    {
+      "name": "max_fit_rms",
+      "label": "球拟合残差上限(mm)",
+      "type": "number",
+      "default": 0.005,
+      "min": 0.0
+    }
+  ],
+  "outputs": [
+    {
+      "name": "bump高度点云",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/tools/Point3DAlg_DomeFit.h",
+      "src/Point3DAlg/tools/Point3DAlg_DomeFit.cpp",
+      "src/ShapelyAlg/ShapelyAlg.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools",
+      "src/ShapelyAlg"
+    ]
+  }
+}

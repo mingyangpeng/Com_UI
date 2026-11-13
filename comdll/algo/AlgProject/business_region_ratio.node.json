@@ -1,0 +1,75 @@
+﻿{
+  "node": {
+    "id": "business.region.ratio",
+    "name": "区域缺陷率统计",
+    "group": "业务算子",
+    "category": "处理",
+    "description": "点云按高度区间过滤后 2.5D 投影，与 ROI 求交计算缺陷面积占比；结果并入节点消息输出"
+  },
+  "runtime": "native",
+  "assembly": "BusinessAlg.dll",
+  "method": "BusinessAlg_ComuiRegionRatio",
+  "inputs": [
+    { "name": "点云", "type": "cloud" }
+  ],
+  "params": [
+    {
+      "name": "min_z",
+      "label": "高度下限(mm)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "max_z",
+      "label": "高度上限(mm)",
+      "type": "number",
+      "default": 10.0
+    },
+    {
+      "name": "roi_x",
+      "label": "ROI 左上角X(mm)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "roi_y",
+      "label": "ROI 左上角Y(mm)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "roi_w",
+      "label": "ROI 宽(mm)",
+      "type": "number",
+      "default": 100.0,
+      "min": 0.001
+    },
+    {
+      "name": "roi_h",
+      "label": "ROI 高(mm)",
+      "type": "number",
+      "default": 100.0,
+      "min": 0.001
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/BusinessAlg_comui.cpp",
+      "src/BusinessAlg/BusinessAlg_Region.cpp",
+      "src/BusinessAlg/include/BusinessAlg_api.h",
+      "src/AlgExport.h",
+      "src/ShapelyAlg/ShapelyAlg.h",
+      "src/ShapelyAlg/Stereo.h",
+      "src/ShapelyAlg/Geom.h",
+      "src/ShapelyAlg/Types.h",
+      "src/ShapelyAlg/Stereo.cpp",
+      "src/ShapelyAlg/Geom.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg",
+      "src/BusinessAlg"
+    ]
+  }
+}

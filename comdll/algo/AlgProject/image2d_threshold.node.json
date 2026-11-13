@@ -1,0 +1,80 @@
+{
+  "node": {
+    "id": "alg.image2d.threshold",
+    "name": "阈值化",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "灰度阈值二值化：mode 0 固定二值/1 反二值/2 OTSU/3 自适应均值/4 自适应高斯"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiThreshold",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "mode",
+      "label": "模式",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 4
+    },
+    {
+      "name": "thresh",
+      "label": "阈值",
+      "type": "number",
+      "default": 128,
+      "min": 0,
+      "max": 255
+    },
+    {
+      "name": "maxval",
+      "label": "最大值",
+      "type": "number",
+      "default": 255,
+      "min": 0,
+      "max": 255
+    },
+    {
+      "name": "block_size",
+      "label": "自适应窗口",
+      "type": "int",
+      "default": 3,
+      "min": 3,
+      "max": 51
+    },
+    {
+      "name": "c",
+      "label": "自适应偏移C",
+      "type": "number",
+      "default": 0,
+      "min": -100,
+      "max": 100
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

@@ -1,0 +1,119 @@
+{
+  "node": {
+    "id": "alg.point3d.bump_report",
+    "name": "bump全参数报表",
+    "group": "3D 点云",
+    "category": "测量",
+    "description": "bump 阵列一次性全参数检测：高度（球顶拟合）+ 截面直径（距顶 0.35 处圆拟合）+ 共面性偏差 + NG 位；可选名义网格位置度（nominal_pitch_*>0 启用，平移-only 不含旋转）；输出每 bump 一点（z=高度）与统计消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiBumpReport",
+  "inputs": [
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "height_threshold",
+      "label": "bump判定高度(mm)",
+      "type": "number",
+      "default": 0.02,
+      "min": 0.0
+    },
+    {
+      "name": "cluster_tolerance",
+      "label": "聚类连通距离(mm)",
+      "type": "number",
+      "default": 0.25,
+      "min": 0.01
+    },
+    {
+      "name": "height_min",
+      "label": "高度NG下限(mm,0=不判)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "height_max",
+      "label": "高度NG上限(mm,0=不判)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "diameter_min",
+      "label": "直径NG下限(mm,0=不判)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "diameter_max",
+      "label": "直径NG上限(mm,0=不判)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "nominal_pitch_x",
+      "label": "名义网格X间距(mm,0=不判位置度)",
+      "type": "number",
+      "default": 0.0,
+      "min": 0.0
+    },
+    {
+      "name": "nominal_pitch_y",
+      "label": "名义网格Y间距(mm)",
+      "type": "number",
+      "default": 0.0,
+      "min": 0.0
+    },
+    {
+      "name": "nominal_origin_x",
+      "label": "名义网格原点X(mm)",
+      "type": "number",
+      "default": 0.0,
+      "min": 0.0
+    },
+    {
+      "name": "nominal_origin_y",
+      "label": "名义网格原点Y(mm)",
+      "type": "number",
+      "default": 0.0,
+      "min": 0.0
+    },
+    {
+      "name": "pos_threshold",
+      "label": "位置度NG阈值(mm)",
+      "type": "number",
+      "default": 0.05,
+      "min": 0.0
+    }
+  ],
+  "outputs": [
+    {
+      "name": "bump点云",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/tools/Point3DAlg_BumpReport.h",
+      "src/Point3DAlg/tools/Point3DAlg_BumpReport.cpp",
+      "src/Point3DAlg/tools/Point3DAlg_DomeFit.h",
+      "src/Point3DAlg/tools/Point3DAlg_DomeFit.cpp",
+      "src/Point3DAlg/tools/Point3DAlg_CircleFit.h",
+      "src/Point3DAlg/tools/Point3DAlg_CircleFit.cpp",
+      "src/Point3DAlg/tools/Point3DAlg_FitUtil.h",
+      "src/ShapelyAlg/ShapelyAlg.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools",
+      "src/ShapelyAlg"
+    ]
+  }
+}

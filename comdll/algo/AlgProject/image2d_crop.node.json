@@ -1,0 +1,72 @@
+{
+  "node": {
+    "id": "alg.image2d.crop",
+    "name": "裁剪",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "ROI 裁剪（越界自动钳制）"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiCrop",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "x",
+      "label": "X",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000
+    },
+    {
+      "name": "y",
+      "label": "Y",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000
+    },
+    {
+      "name": "width",
+      "label": "宽",
+      "type": "int",
+      "default": 100,
+      "min": 1,
+      "max": 100000
+    },
+    {
+      "name": "height",
+      "label": "高",
+      "type": "int",
+      "default": 100,
+      "min": 1,
+      "max": 100000
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

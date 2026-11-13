@@ -1,0 +1,138 @@
+{
+  "Name": "m1",
+  "Locked": false,
+  "Nodes": [
+    {
+      "Id": "f04470bf",
+      "Def": "img.gray",
+      "Title": null,
+      "X": 589,
+      "Y": 48,
+      "Width": null,
+      "Params": {}
+    },
+    {
+      "Id": "9f5642d5",
+      "Def": "pub.image",
+      "Title": null,
+      "X": 143,
+      "Y": 253,
+      "Width": null,
+      "Params": {
+        "topic": "image/stitched"
+      }
+    },
+    {
+      "Id": "6ac14f23",
+      "Def": "draw.2d",
+      "Title": null,
+      "X": -135.8171249999998,
+      "Y": -232.3817499999993,
+      "Width": 321.99999999999994,
+      "Params": {}
+    },
+    {
+      "Id": "9146a8d0",
+      "Def": "source.image",
+      "Title": null,
+      "X": -225.32212499999974,
+      "Y": 148.87474999999998,
+      "Width": null,
+      "Params": {
+        "pattern": "\u68CB\u76D8"
+      }
+    },
+    {
+      "Id": "2c8ecc14",
+      "Def": "draw.2d",
+      "Title": null,
+      "X": 800,
+      "Y": 173,
+      "Width": 400,
+      "Params": {}
+    },
+    {
+      "Id": "7a84f981",
+      "Def": "img.blur",
+      "Title": null,
+      "X": 833,
+      "Y": 32,
+      "Width": null,
+      "Params": {}
+    },
+    {
+      "Id": "176853eb",
+      "Def": "draw.2d",
+      "Title": null,
+      "X": 1064.493564782424,
+      "Y": -411.51709217582277,
+      "Width": 554,
+      "Params": {}
+    },
+    {
+      "Id": "a80bdae6",
+      "Def": "alg.image2d.canny",
+      "Title": null,
+      "X": 167.74999999999957,
+      "Y": 402.99999999999955,
+      "Width": null,
+      "Params": {
+        "threshold1": 49.50517120395999,
+        "threshold2": 323.5294117647059
+      }
+    },
+    {
+      "Id": "80046680",
+      "Def": "draw.2d",
+      "Title": null,
+      "X": 1684.2152857142898,
+      "Y": -58.16419642857045,
+      "Width": 899.0999999999997,
+      "Params": {}
+    }
+  ],
+  "Connections": [
+    {
+      "From": "9146a8d0",
+      "FromPort": "\u56FE\u50CF",
+      "To": "6ac14f23",
+      "ToPort": "\u8F93\u5165"
+    },
+    {
+      "From": "9146a8d0",
+      "FromPort": "\u56FE\u50CF",
+      "To": "f04470bf",
+      "ToPort": "\u8F93\u5165"
+    },
+    {
+      "From": "f04470bf",
+      "FromPort": "\u8F93\u51FA",
+      "To": "2c8ecc14",
+      "ToPort": "\u8F93\u5165"
+    },
+    {
+      "From": "f04470bf",
+      "FromPort": "\u8F93\u51FA",
+      "To": "7a84f981",
+      "ToPort": "\u8F93\u5165"
+    },
+    {
+      "From": "7a84f981",
+      "FromPort": "\u8F93\u51FA",
+      "To": "176853eb",
+      "ToPort": "\u8F93\u5165"
+    },
+    {
+      "From": "9146a8d0",
+      "FromPort": "\u56FE\u50CF",
+      "To": "a80bdae6",
+      "ToPort": "\u8F93\u5165"
+    },
+    {
+      "From": "a80bdae6",
+      "FromPort": "\u8F93\u51FA",
+      "To": "80046680",
+      "ToPort": "\u8F93\u5165"
+    }
+  ]
+}

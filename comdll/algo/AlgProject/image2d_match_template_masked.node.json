@@ -1,0 +1,56 @@
+{
+  "node": {
+    "id": "alg.image2d.match_template_masked",
+    "name": "掩膜匹配",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "带掩膜模板匹配（遮挡/干扰背景鲁棒；method 仅 0/3）：输出命中外框，得分并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiMatchTemplateMasked",
+  "inputs": [
+    {
+      "name": "搜索图",
+      "type": "image"
+    },
+    {
+      "name": "模板",
+      "type": "image"
+    },
+    {
+      "name": "掩膜",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "匹配方法(仅0/3)",
+      "type": "int",
+      "default": 3,
+      "min": 0,
+      "max": 5
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

@@ -311,7 +311,8 @@ public partial class MainWindow
 
     private void SelectTab(TabItem tab)
     {
-        TabControlOf(tab)?.SelectedItem = tab;
+        var tc = TabControlOf(tab);
+        if (tc is not null) tc.SelectedItem = tab;
         SyncPropsFor(tab);
     }
 

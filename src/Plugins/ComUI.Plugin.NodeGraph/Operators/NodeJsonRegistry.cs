@@ -22,6 +22,32 @@ public static class NodeJsonRegistry
         AllowTrailingCommas = true,
     };
 
+    // ==================== native 运行时信息（C++ 导出用） ====================
+
+    /// <summary>native 算子源码描述（node.json "source" 字段）：导出 C++ 工程时按此拷贝真实源码。</summary>
+    public sealed record NativeSourceMeta(string Dll, string Entry, List<string> Sources, List<string> Includes);
+
+    /// <summary>已注册 native 算子的运行时元数据：Id → (DLL 相对名, 入口函数名)。</summary>
+    private static readonly Dictionary<string, (string Dll, string Entry)> _nativeMeta = new();
+
+    /// <summary>已注册 native 算子的源码元数据：Id → (DLL 名, 入口, 源文件相对 JSON 目录列表, 头文件搜索目录列表)。</summary>
+    private static readonly Dictionary<string, NativeSourceMeta> _nativeSourceMeta = new();
+
+    /// <summary>已注册算子的 node.json 所在目录：Id → 绝对路径（源码/程序集相对路径的解析基准）。</summary>
+    private static readonly Dictionary<string, string> _jsonDirs = new();
+
+    /// <summary>查算子 node.json 所在目录（源码相对路径基准）；未注册返回空串。</summary>
+    public static string GetJsonDir(string defId) =>
+        _jsonDirs.TryGetValue(defId, out var d) ? d : "";
+
+    /// <summary>查 native 算子的 DLL 与入口（C++ 代码导出据此生成真实调用）；非 native 算子返回 null。</summary>
+    public static (string Dll, string Entry)? TryGetNativeMeta(string defId) =>
+        _nativeMeta.TryGetValue(defId, out var meta) ? meta : null;
+
+    /// <summary>查 native 算子的源码清单（node.json source.files；未声明 = null，导出时回退 DLL 调用壳）。</summary>
+    public static NativeSourceMeta? TryGetNativeSource(string defId) =>
+        _nativeSourceMeta.TryGetValue(defId, out var meta) ? meta : null;
+
     public static IEnumerable<NodeDef> LoadFrom(string comdllRoot, Action<string> log)
     {
         var algoDir = Path.Combine(comdllRoot, "algo");
@@ -43,6 +69,7 @@ public static class NodeJsonRegistry
             var def = Build(json, Path.GetDirectoryName(file)!, log);
             if (def is not null)
             {
+                _jsonDirs[json.Node.Id] = Path.GetDirectoryName(file)!;   // 源码相对路径解析基准
                 log($"算子(JSON)已注册: {json.Node.Name} <{json.Node.Id}> ← {Path.GetFileName(file)}");
                 yield return def;
             }
@@ -70,6 +97,12 @@ public static class NodeJsonRegistry
                 var dllPath = Path.Combine(folder, json.Assembly);
                 if (!File.Exists(dllPath)) throw new Exception($"找不到原生库 {json.Assembly}");
                 native = new NativeAlgoInvoker(dllPath, json.Method ?? throw new Exception("runtime=native 需要 method"));
+                _nativeMeta[json.Node.Id] = (json.Assembly, json.Method);   // C++ 导出用：DLL 名 + 入口
+                if (json.Source is { } src)
+                    _nativeSourceMeta[json.Node.Id] = new NativeSourceMeta(
+                        json.Assembly, json.Method,
+                        src.Files?.Where(f => !string.IsNullOrWhiteSpace(f)).ToList() ?? new List<string>(),
+                        src.Includes?.Where(d => !string.IsNullOrWhiteSpace(d)).ToList() ?? new List<string>());
             }
             else
             {
@@ -306,9 +339,20 @@ public static class NodeJsonRegistry
         [JsonPropertyName("assembly")] public string Assembly { get; set; } = "";
         [JsonPropertyName("type")] public string? Type { get; set; }
         [JsonPropertyName("method")] public string? Method { get; set; }
+        /// <summary>native 算子的源码声明（C++ 导出用）：files = 相对本 JSON 目录的源文件列表，includes = 头文件搜索目录。</summary>
+        [JsonPropertyName("source")] public JsonSource? Source { get; set; }
         [JsonPropertyName("inputs")] public List<JsonPort> Inputs { get; set; } = new();
         [JsonPropertyName("outputs")] public List<JsonOut> Outputs { get; set; } = new();
         [JsonPropertyName("params")] public List<JsonParam> Params { get; set; } = new();
+    }
+
+    /// <summary>node.json "source" 字段：算子源码交付声明（后期算子库必须提供 C++ 源码）。</summary>
+    public sealed class JsonSource
+    {
+        /// <summary>源文件列表（相对 node.json 所在目录，如 "../src/Point3DAlg/Point3DAlg_comui.cpp"）。</summary>
+        [JsonPropertyName("files")] public List<string>? Files { get; set; }
+        /// <summary>头文件搜索目录（相对 node.json 所在目录，导出工程 include_directories 用）。</summary>
+        [JsonPropertyName("includes")] public List<string>? Includes { get; set; }
     }
 
     public sealed class NodeMeta

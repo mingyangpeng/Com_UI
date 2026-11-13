@@ -42,13 +42,37 @@ public static class GraphExecutor
             }
 
             // ===== 依序执行 =====
+            // 未连线/上游被跳过的节点 = 跳过（灰态+日志），不中止整图——
+            // 否则一个忘连线的输出节点会把后面的预览卡全部拖死（用户报"2D/3D 预览不显示"的根因）。
+            // 真正的执行错误（算法抛异常）仍然中止整图并标红。
             var outputs = new Dictionary<(string Node, string Port), object?>();
+            var skipped = new HashSet<string>();
 
             foreach (var id in order)
             {
                 ct.ThrowIfCancellationRequested();
                 var node = byId[id];
                 var def = NodeDefs.Map[node.DefId];
+
+                // 输入端口未连线，或上游节点被跳过（无产出）→ 本节点跳过，下游级联跳过
+                var missingInput = def.Inputs.FirstOrDefault(p => graph.FindInputConnection(node.Id, p.Name) is null);
+                if (missingInput is not null)
+                {
+                    skipped.Add(id);
+                    setStatus(node, NodeStatus.Idle, null);
+                    log($"[{def.Name}] 跳过：输入「{missingInput.Name}」未连线");
+                    continue;
+                }
+                var skippedUpstream = def.Inputs
+                    .Select(p => graph.FindInputConnection(node.Id, p.Name)!)
+                    .Any(c => skipped.Contains(c.FromNode));
+                if (skippedUpstream)
+                {
+                    skipped.Add(id);
+                    setStatus(node, NodeStatus.Idle, null);
+                    log($"[{def.Name}] 跳过：上游未执行");
+                    continue;
+                }
 
                 setStatus(node, NodeStatus.Running, null);
 
@@ -59,9 +83,7 @@ public static class GraphExecutor
                     foreach (var port in def.Inputs)
                     {
                         var conn = graph.FindInputConnection(node.Id, port.Name);
-                        if (conn is null)
-                            throw new Exception($"输入「{port.Name}」未连线");
-                        if (!outputs.TryGetValue((conn.FromNode, conn.FromPort), out var value) || value is null)
+                        if (!outputs.TryGetValue((conn!.FromNode, conn.FromPort), out var value) || value is null)
                             throw new Exception($"输入「{port.Name}」的上游没有产出");
                         inputs[port.Name] = value;
                     }

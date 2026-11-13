@@ -7,6 +7,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using ComUI.Sdk.Ui;
 
 namespace ComUI.Plugin.NodeGraph;
 
@@ -17,7 +18,8 @@ namespace ComUI.Plugin.NodeGraph;
 /// Content 结构稳定（Rebuild 只重填内部列表，绝不整体替换——旧实现连搜索框一起冲掉），
 /// 容器级按下/移动/释放状态机（capture 在控件上，命中表驱动）。
 /// 栏目头：按下-移动超 5px = 排序拖拽（落点横线指示），原地点击 = 折叠/展开；搜索过滤时禁用排序。
-/// 栏目顺序持久化在 config/op_order.json（未登记的新栏目按注册顺序续后）。
+/// 栏目头右端图钉（PinGlyph）：按下（蓝竖钉）= 该栏目钉住禁拖，拔起（灰斜钉）= 可拖动排序。
+/// 栏目顺序与图钉状态持久化在 config/op_order.json（旧版纯数组格式自动兼容）。
 /// </summary>
 public sealed class NodeLibraryView : UserControl, IDisposable
 {
@@ -29,9 +31,11 @@ public sealed class NodeLibraryView : UserControl, IDisposable
     public event Action<string, PixelPoint>? OperatorPlaced;
 
     private readonly HashSet<string> _collapsedGroups = new();
+    private readonly HashSet<string> _pinnedGroups = new();    // 图钉按下的栏目（禁拖，持久化）
     private string _filter = "";
     private readonly List<string> _groupOrder = new();        // 栏目显示顺序（拖拽排序，持久化）
     private readonly Dictionary<string, Border> _headerIndex = new();   // 栏目名 → 头（视觉顺序，命中用）
+    private readonly Dictionary<string, Border> _pinIndex = new();      // 栏目名 → 图钉命中区
     private readonly StackPanel _listPanel = new() { Spacing = 0 };     // 列表容器（Rebuild 只重填它）
     private readonly Border _dropLine = new()                 // 栏目落点指示（目标头上/下缘蓝色横线）
     {
@@ -97,6 +101,7 @@ public sealed class NodeLibraryView : UserControl, IDisposable
         {
             if (_pressGroup is { } pg && _dragGroup is null)
             {
+                if (_pinnedGroups.Contains(pg)) return;   // 图钉按下 = 钉住禁拖
                 var p = e.GetPosition(this);
                 if (Math.Abs(p.X - _pressPos.X) <= 5 && Math.Abs(p.Y - _pressPos.Y) <= 5) return;
                 _dragGroup = pg;
@@ -116,6 +121,12 @@ public sealed class NodeLibraryView : UserControl, IDisposable
             var pos = e.GetPosition(this);
             if (!wasDragging)
             {
+                // 图钉点击优先：命中图钉 = 切换钉住状态（不触发折叠/排序）
+                if (pressGroup is { } pg && HitPin(pos, pg) is not null)
+                {
+                    TogglePin(pg);
+                    return;
+                }
                 // 原地点击栏目头 = 折叠/展开
                 if (pressGroup is not null && HitHeader(pos)?.Key == pressGroup)
                 {
@@ -131,6 +142,8 @@ public sealed class NodeLibraryView : UserControl, IDisposable
             if (dragGroup is null || HitHeader(pos, dragGroup) is not { } hit ||
                 hit.Value.TranslatePoint(new Point(0, 0), this) is not { } t)
                 return;   // 落点没命中栏目头 = 取消，顺序不变
+            if (_pinnedGroups.Contains(hit.Key))
+                return;   // 落点栏目被图钉钉住：位置固定，不接收插入（拖动取消，顺序不变）
 
             var after = pos.Y > t.Y + hit.Value.Bounds.Height / 2;
             foreach (var g in NodeDefs.All.GroupBy(d => d.Group).Select(g => g.Key))
@@ -145,15 +158,34 @@ public sealed class NodeLibraryView : UserControl, IDisposable
 
     public void Dispose() { }
 
-    // ==================== 栏目顺序（拖拽排序 + 持久化） ====================
+    // ==================== 栏目顺序与图钉（拖拽排序 + 持久化） ====================
 
+    /// <summary>op_order.json 兼容两种格式：旧版纯数组 <c>["栏目A","栏目B"]</c>；新版对象 <c>{"Order":[...],"Pinned":[...]}</c>。</summary>
     private void LoadOrder()
     {
         if (_orderPath is null || !File.Exists(_orderPath)) return;
         try
         {
-            foreach (var name in System.Text.Json.JsonSerializer.Deserialize<string[]>(File.ReadAllText(_orderPath)) ?? Array.Empty<string>())
-                if (!string.IsNullOrWhiteSpace(name)) _groupOrder.Add(name);
+            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(_orderPath));
+            var root = doc.RootElement;
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var el in root.EnumerateArray())
+                    if (el.ValueKind == System.Text.Json.JsonValueKind.String && !string.IsNullOrWhiteSpace(el.GetString()))
+                        _groupOrder.Add(el.GetString()!);
+                return;   // 旧版纯数组：只有顺序，无图钉
+            }
+            if (root.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                if (root.TryGetProperty("Order", out var order) && order.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    foreach (var el in order.EnumerateArray())
+                        if (el.ValueKind == System.Text.Json.JsonValueKind.String && !string.IsNullOrWhiteSpace(el.GetString()))
+                            _groupOrder.Add(el.GetString()!);
+                if (root.TryGetProperty("Pinned", out var pinned) && pinned.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    foreach (var el in pinned.EnumerateArray())
+                        if (el.ValueKind == System.Text.Json.JsonValueKind.String && !string.IsNullOrWhiteSpace(el.GetString()))
+                            _pinnedGroups.Add(el.GetString()!);
+            }
         }
         catch { }   // 顺序文件损坏=回退注册顺序
     }
@@ -164,9 +196,31 @@ public sealed class NodeLibraryView : UserControl, IDisposable
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(_orderPath)!);
-            File.WriteAllText(_orderPath, System.Text.Json.JsonSerializer.Serialize(_groupOrder));
+            var obj = new System.Text.Json.Nodes.JsonObject
+            {
+                ["Order"] = new System.Text.Json.Nodes.JsonArray(_groupOrder.Select(n => (System.Text.Json.Nodes.JsonNode?)n).ToArray()),
+                ["Pinned"] = new System.Text.Json.Nodes.JsonArray(_pinnedGroups.Select(n => (System.Text.Json.Nodes.JsonNode?)n).ToArray()),
+            };
+            File.WriteAllText(_orderPath, obj.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         }
         catch { }   // 保存失败只影响下次启动的顺序
+    }
+
+    /// <summary>切换栏目图钉（按下=禁拖 / 拔起=可拖）并持久化。</summary>
+    private void TogglePin(string group)
+    {
+        if (!_pinnedGroups.Remove(group)) _pinnedGroups.Add(group);
+        SaveOrder();
+        Rebuild();
+    }
+
+    /// <summary>指针是否落在指定栏目的图钉命中区上。</summary>
+    private Border? HitPin(Point pos, string group)
+    {
+        if (!_pinIndex.TryGetValue(group, out var pin)) return null;
+        if (pin.TranslatePoint(new Point(0, 0), this) is not { } t) return null;
+        if (pos.X < t.X || pos.X > t.X + pin.Bounds.Width || pos.Y < t.Y || pos.Y > t.Y + pin.Bounds.Height) return null;
+        return pin;
     }
 
     /// <summary>指针下的栏目头（exclude=拖拽来源栏目）。</summary>
@@ -205,6 +259,7 @@ public sealed class NodeLibraryView : UserControl, IDisposable
     {
         _listPanel.Children.Clear();
         _headerIndex.Clear();
+        _pinIndex.Clear();
 
         // ===== 算子分组：栏目按拖拽顺序（未登记的新栏目按注册顺序续后），过滤搜索词 =====
         var groups = NodeDefs.All.GroupBy(d => d.Group).ToList();
@@ -245,7 +300,8 @@ public sealed class NodeLibraryView : UserControl, IDisposable
     private bool MatchFilter(string name) =>
         _filter.Length == 0 || name.Contains(_filter, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>栏目头（无自带指针处理器——排序状态机收在容器级）。</summary>
+    /// <summary>栏目头（无自带指针处理器——排序状态机收在容器级）。
+    /// 右端图钉：按下（蓝竖钉）= 钉住禁拖，拔起（灰斜钉）= 可拖动排序；点击切换（容器级判定，不触发折叠）。</summary>
     private Border GroupHeader(string name, int count, bool expanded)
     {
         var arrow = new TextBlock
@@ -271,6 +327,26 @@ public sealed class NodeLibraryView : UserControl, IDisposable
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(6, 0, 0, 0),
         };
+        var pinned = _pinnedGroups.Contains(name);
+        var pin = new Border
+        {
+            Width = 20, Height = 20,          // 命中区比图标大（14×14 图标 + 手指容差）
+            Background = Brushes.Transparent,
+            VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Cursor = new Cursor(StandardCursorType.Hand),
+            Child = new Canvas   // 图标在命中区内居中
+            {
+                Width = 20, Height = 20,
+                Children =
+                {
+                    PinGlyph.Build(pinned),
+                },
+            },
+        };
+        var pinIcon = (Canvas)pin.Child!;
+        Canvas.SetLeft(pinIcon.Children[0], 3);
+        Canvas.SetTop(pinIcon.Children[0], 3);
 
         var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*,Auto") };
         grid.Children.Add(arrow);
@@ -278,6 +354,8 @@ public sealed class NodeLibraryView : UserControl, IDisposable
         grid.Children.Add(title);
         countText.SetValue(Grid.ColumnProperty, 2);
         grid.Children.Add(countText);
+        pin.SetValue(Grid.ColumnProperty, 3);
+        grid.Children.Add(pin);
 
         var header = new Border
         {
@@ -292,7 +370,11 @@ public sealed class NodeLibraryView : UserControl, IDisposable
             Cursor = new Cursor(StandardCursorType.Hand),
             Child = grid,
         };
-        ToolTip.SetTip(header, "按住拖动可排序栏目；点击折叠/展开");
+        ToolTip.SetTip(header, pinned
+            ? "图钉按下：栏目已钉住，不可拖动排序（点击图钉拔起恢复）"
+            : "按住拖动可排序栏目；点击折叠/展开；右端图钉按下 = 钉住禁拖");
+        ToolTip.SetTip(pin, pinned ? "拔起图钉（恢复可拖动排序）" : "按下图钉（钉住该栏目，禁止拖动排序）");
+        _pinIndex[name] = pin;
         return header;
     }
 

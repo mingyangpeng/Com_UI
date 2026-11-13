@@ -1,0 +1,73 @@
+{
+  "node": {
+    "id": "alg.point3d.circle_fit",
+    "name": "圆孔位量测",
+    "group": "3D 点云",
+    "category": "测量",
+    "description": "高度切片[z_low,z_high]提取孔壁/圆柱壁点，聚类后逐簇 XY 圆拟合，输出每孔一点（z=半径），孔径/圆心定位"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiCircleFit",
+  "inputs": [
+    { "name": "点云", "type": "cloud" }
+  ],
+  "params": [
+    {
+      "name": "z_low",
+      "label": "切片高度下限(mm)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "z_high",
+      "label": "切片高度上限(mm)",
+      "type": "number",
+      "default": 0.1
+    },
+    {
+      "name": "cluster_tolerance",
+      "label": "聚类连通距离(mm)",
+      "type": "number",
+      "default": 0.2,
+      "min": 0.01
+    },
+    {
+      "name": "min_points",
+      "label": "每簇最少点数",
+      "type": "int",
+      "default": 20,
+      "min": 3
+    },
+    {
+      "name": "radius_min",
+      "label": "半径下限(mm)",
+      "type": "number",
+      "default": 0.05,
+      "min": 0.0
+    },
+    {
+      "name": "radius_max",
+      "label": "半径上限(mm)",
+      "type": "number",
+      "default": 50.0
+    }
+  ],
+  "outputs": [
+    { "name": "孔位点云", "type": "cloud" }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/tools/Point3DAlg_CircleFit.h",
+      "src/Point3DAlg/tools/Point3DAlg_CircleFit.cpp",
+      "src/Point3DAlg/tools/Point3DAlg_FitUtil.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools"
+    ]
+  }
+}

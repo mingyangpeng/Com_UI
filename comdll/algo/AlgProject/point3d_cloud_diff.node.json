@@ -1,0 +1,72 @@
+{
+  "node": {
+    "id": "alg.point3d.cloud_diff",
+    "name": "点云高度差对比",
+    "group": "3D 点云",
+    "category": "测量",
+    "description": "基准/被测两片点云 XY 栅格化后逐格求 z 差（中位数），输出差值点云（z=差值，正=被测高）与统计；超差阈值判定 NG 占比；align_search>0 时先做 XY 粗对齐（精度 ≈±cell/2，含 z 常差的对比需台阶/凸台特征形貌）"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiCloudDiff",
+  "inputs": [
+    {
+      "name": "基准点云",
+      "type": "cloud"
+    },
+    {
+      "name": "被测点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "cell_size",
+      "label": "栅格边长(mm)",
+      "type": "number",
+      "default": 0.1,
+      "min": 0.01
+    },
+    {
+      "name": "min_points",
+      "label": "格最少点数",
+      "type": "int",
+      "default": 3,
+      "min": 1
+    },
+    {
+      "name": "diff_threshold",
+      "label": "超差阈值(mm,0=不判)",
+      "type": "number",
+      "default": 0.02,
+      "min": 0.0
+    },
+    {
+      "name": "align_search",
+      "label": "XY粗对齐搜索半径(mm,0=不对齐)",
+      "type": "number",
+      "default": 0.0,
+      "min": 0.0
+    }
+  ],
+  "outputs": [
+    {
+      "name": "差值点云",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/tools/Point3DAlg_CloudDiff.h",
+      "src/Point3DAlg/tools/Point3DAlg_CloudDiff.cpp",
+      "src/Point3DAlg/tools/Point3DAlg_FitUtil.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools"
+    ]
+  }
+}

@@ -133,6 +133,7 @@ src/Plugins/
 - **分屏标签区**：SplitNode 树（Core 模型）递归渲染为嵌套 Grid + 格间 GridSplitter；每格一个 TabControl；标签拖拽（**标签条上=按落点插入位置**（同组=左右排序、跨组=按位插入，插入线指示）、标签条以下边缘 28%=方向拆分、中心=移入组末尾、拖出主窗=浮动；同组排序走模型 ReorderPanel+增量摘插，不整树重建）；Ctrl+Alt+方向=拆分、Ctrl+Alt+F=浮动。
 - **工作台数据源切换（2026-10-07）**：2D/3D 工作台工具栏「数据源」下拉——列出总线 GetTopics() 中最新载荷类型匹配的主题（CloudPayload/ImagePayload），切换=退订旧数据主题+订阅新主题（3D 先清空当前实体；控制订阅 cloud/removed 与 sel/* 固定不切换）；约定默认主题（cloud/merged、image/stitched）恒在列。发布侧（发布点云/发布图像的主题参数）与订阅侧（数据源）均可配，多主题分流成为完整工作流。
 - **算子库栏目排序（2026-10-07，按「面板」列表架构重构）**：Content 结构稳定（Rebuild 只重填内部列表——旧实现 `Content=BuildContent()` 连搜索框一起冲掉的潜伏 bug 一并消灭）；容器级按下/移动/释放状态机（capture 在控件上，命中表驱动——栏目头与算子行手势互不干扰）；栏目头移动>5px=排序拖拽（落点横线）、原地点击=折叠切换；搜索过滤时禁用排序。渲染按 `config/op_order.json` 的栏目名顺序（未登记栏目按注册顺序续后，JSON 算子/新栏目自动兼容）。
+- **算子库栏目图钉（2026-10-13）**：栏目头右端 `PinGlyph`（Sdk.Ui，VS2022 固定图标风格——蓝竖钉=按下/灰斜钉=拔起）；按下=该栏目禁拖动排序且不接收插入（拖拽落点命中钉住栏目=取消）；点击切换不触发折叠（容器状态机图钉命中优先）；钉住状态持久化在 `config/op_order.json` 的 `Pinned` 数组（旧版纯数组格式自动兼容读取）。
 - **快照对比（2026-10-07）**：2D/3D 工作台「📷 快照」→ 插件侧只读视图（ImageSnapshotView / CloudSnapshotView）经 `ctx.OpenDocument(title, view, null)` 开动态文档标签；数据=冻结引用共享（总线载荷约定不可变，零拷贝；3D 未传完实体按已揭示点数截取）+ 相机姿态继承；只保留查看导航（3D 上传走同步分块路径——多后台 GL worker 共享上下文曾死锁）；restoreKey=null 不进会话；插件 TrackSnapshot 登记，新快照时回收已关闭（不在可视树）快照的 GL 资源，Shutdown 全清。
 - **点云上传**：后台线程 BeginJob 一次性完成（NativeMemory 原生暂存 → Marshal.Copy → GL.BufferData 从原生指针），UI 线程零 GL 数据操作；UI 侧 SetRevealed 揭示步进做渐进显示；同步回退路径（无后台）保留分块 BufferSubData。
 

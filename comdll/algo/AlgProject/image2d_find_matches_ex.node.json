@@ -1,0 +1,124 @@
+{
+  "node": {
+    "id": "alg.image2d.find_matches_ex",
+    "name": "Mark 阵列全检",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "多目标×旋转×尺度组合模板匹配（Mark 阵列全检，全局 NMS）：输出中心十字标注，位置/尺度/角度/得分并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiFindMatchesEx",
+  "inputs": [
+    {
+      "name": "搜索图",
+      "type": "image"
+    },
+    {
+      "name": "模板",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "匹配方法",
+      "type": "int",
+      "default": 5,
+      "min": 0,
+      "max": 5
+    },
+    {
+      "name": "score_threshold",
+      "label": "得分阈值",
+      "type": "number",
+      "default": 0.6,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "name": "max_matches",
+      "label": "最大目标数",
+      "type": "int",
+      "default": 50,
+      "min": 1,
+      "max": 200
+    },
+    {
+      "name": "nms_radius",
+      "label": "NMS 半径",
+      "type": "int",
+      "default": 10,
+      "min": 0,
+      "max": 200
+    },
+    {
+      "name": "scale_lo",
+      "label": "尺度下限",
+      "type": "number",
+      "default": 0.9,
+      "min": 0.01,
+      "max": 10
+    },
+    {
+      "name": "scale_hi",
+      "label": "尺度上限",
+      "type": "number",
+      "default": 1.1,
+      "min": 0.01,
+      "max": 10
+    },
+    {
+      "name": "scale_step",
+      "label": "尺度步进",
+      "type": "number",
+      "default": 0.05,
+      "min": 0.001,
+      "max": 10
+    },
+    {
+      "name": "angle_lo",
+      "label": "角度下限(度)",
+      "type": "number",
+      "default": -5,
+      "min": -360,
+      "max": 360
+    },
+    {
+      "name": "angle_hi",
+      "label": "角度上限(度)",
+      "type": "number",
+      "default": 5,
+      "min": -360,
+      "max": 360
+    },
+    {
+      "name": "angle_step",
+      "label": "角度步进(度)",
+      "type": "number",
+      "default": 1,
+      "min": 0.01,
+      "max": 90
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

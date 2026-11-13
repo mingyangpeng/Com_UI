@@ -1,0 +1,76 @@
+{
+  "node": {
+    "id": "alg.image2d.find_matches",
+    "name": "多目标匹配",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "多目标模板匹配（NMS 去重）：输出命中外框标注，位置/得分并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiFindMatches",
+  "inputs": [
+    {
+      "name": "搜索图",
+      "type": "image"
+    },
+    {
+      "name": "模板",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "匹配方法",
+      "type": "int",
+      "default": 5,
+      "min": 0,
+      "max": 5
+    },
+    {
+      "name": "score_threshold",
+      "label": "得分阈值",
+      "type": "number",
+      "default": 0.8,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "name": "max_matches",
+      "label": "最大目标数",
+      "type": "int",
+      "default": 10,
+      "min": 1,
+      "max": 100
+    },
+    {
+      "name": "nms_radius",
+      "label": "NMS 半径",
+      "type": "int",
+      "default": 5,
+      "min": 0,
+      "max": 100
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

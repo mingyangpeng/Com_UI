@@ -1,0 +1,61 @@
+{
+  "node": {
+    "id": "alg.point3d.region_plane",
+    "name": "ROI平面量测",
+    "group": "3D 点云",
+    "category": "测量",
+    "description": "XY 矩形区域内稳健拟合平面，量测高度与平面度(PV/σ)；台阶差=两个节点的高度相减；结果并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiRegionPlane",
+  "inputs": [
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "x",
+      "label": "ROI左上X(mm)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "y",
+      "label": "ROI左上Y(mm)",
+      "type": "number",
+      "default": 0.0
+    },
+    {
+      "name": "w",
+      "label": "ROI宽W(mm)",
+      "type": "number",
+      "default": 1.0,
+      "min": 0.001
+    },
+    {
+      "name": "h",
+      "label": "ROI高H(mm)",
+      "type": "number",
+      "default": 1.0,
+      "min": 0.001
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/tools/Point3DAlg_RegionPlane.h",
+      "src/Point3DAlg/tools/Point3DAlg_RegionPlane.cpp",
+      "src/Point3DAlg/tools/Point3DAlg_FitUtil.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools"
+    ]
+  }
+}

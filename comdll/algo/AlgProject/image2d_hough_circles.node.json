@@ -1,0 +1,88 @@
+{
+  "node": {
+    "id": "alg.image2d.hough_circles",
+    "name": "霍夫圆",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "霍夫圆检测（内部自动 3x3 预平滑）：输出检出圆标注，圆心/半径并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiHoughCircles",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "dp",
+      "label": "分辨率倒数",
+      "type": "number",
+      "default": 1,
+      "min": 0.1,
+      "max": 4
+    },
+    {
+      "name": "min_dist",
+      "label": "圆心最小间距",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 10000
+    },
+    {
+      "name": "param1",
+      "label": "Canny高阈值",
+      "type": "number",
+      "default": 50,
+      "min": 1,
+      "max": 1000
+    },
+    {
+      "name": "param2",
+      "label": "投票阈值",
+      "type": "number",
+      "default": 20,
+      "min": 1,
+      "max": 1000
+    },
+    {
+      "name": "min_r",
+      "label": "最小半径",
+      "type": "number",
+      "default": 5,
+      "min": 0,
+      "max": 10000
+    },
+    {
+      "name": "max_r",
+      "label": "最大半径(0不限)",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 10000
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

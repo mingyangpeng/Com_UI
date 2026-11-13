@@ -1,0 +1,72 @@
+{
+  "node": {
+    "id": "alg.image2d.morphology",
+    "name": "形态学",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "op 0 腐蚀/1 膨胀/2 开/3 闭/4 梯度/5 顶帽/6 黑帽；shape 0 矩形/1 十字/2 椭圆"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiMorphology",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "op",
+      "label": "操作",
+      "type": "int",
+      "default": 2,
+      "min": 0,
+      "max": 6
+    },
+    {
+      "name": "shape",
+      "label": "结构元",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 2
+    },
+    {
+      "name": "ksize",
+      "label": "核尺寸",
+      "type": "int",
+      "default": 3,
+      "min": 1,
+      "max": 51
+    },
+    {
+      "name": "iterations",
+      "label": "迭代次数",
+      "type": "int",
+      "default": 1,
+      "min": 1,
+      "max": 20
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "node": {
+    "id": "alg.image2d.enhance",
+    "name": "灰度增强",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "method 0 直方图均衡 / 1 CLAHE（彩色走 Lab 亮度）"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiEnhance",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "方法",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "name": "clip_limit",
+      "label": "对比度上限",
+      "type": "number",
+      "default": 2,
+      "min": 0.1,
+      "max": 10
+    },
+    {
+      "name": "tile_size",
+      "label": "分块边长",
+      "type": "int",
+      "default": 8,
+      "min": 2,
+      "max": 64
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

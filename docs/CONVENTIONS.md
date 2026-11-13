@@ -13,6 +13,7 @@ Sdk 是宿主与所有插件共享的唯一公共程序集（默认 ALC 加载�
 | `DoubleClickDetector`（每目标一实例） | 450ms 时间戳双击判定（UIA/自动化注入的 Click 不带系统双击标志，必须时间戳法） | 侧边栏行 / 节点头部两处时间戳逻辑 |
 | `InlineRename.DoubleClickMs = 450`、`SingleClickDelayMs = 300` | 双击阈值与单击延迟常量 | 散落的魔法数字 |
 | `LockGlyph.Build(locked)` | 形状绘制的锁徽标（emoji 是彩色字体无法着色）：解锁=绿 #7BC886 开锁、锁定=灰 #A0A0A8 闭锁 | AlgoSidebar 内的绘制函数 |
+| `PinGlyph.Build(pinned)` | 形状绘制的图钉徽标（VS2022 固定图标风格）：按下=蓝 #0A84FF 竖直圆头钉、拔起=灰 #9D9D9D 斜钉（45°） | NodeLibraryView 栏目头（钉住=禁拖） |
 | `FileLock.IsLocked / Set / Toggle` | 文件锁定持久化：JSON 顶层 `"Locked": true/false` 字段（缺省=未锁定） | AlgoSidebar 与 NodeGraphPlugin 两处解析 |
 
 ## 交互规则（新界面默认遵循）
@@ -34,6 +35,11 @@ Sdk 是宿主与所有插件共享的唯一公共程序集（默认 ALC 加载�
 - 锁定页的"保存" = 复制副本（解锁、命名「原名 副本」）；解锁或对副本编辑后可正常保存。
 - 锁状态变化发布总线事件（约定 `algo/locked`，载荷=路径），已打开的视图实时同步只读状态。
 - 嵌套按钮注意：Avalonia `Button.Click` 是**冒泡路由事件**——行内嵌套按钮（锁）的 Click 会传到行按钮，处理完必须 `e.Handled = true`。
+
+### 图钉（栏目/行级"钉住禁动"）
+- 图钉徽标用 `PinGlyph.Build(pinned)`（形状绘制，勿用 emoji）；**蓝竖钉=按下（钉住禁拖动排序），灰斜钉=拔起（可移动）**——语义对齐 VS2022 固定图标。
+- 点击图钉 = 切换钉住状态，**不触发**所在行/栏目头的其他单击语义（折叠/打开/选中）——容器级状态机里图钉命中优先判定。
+- 钉住状态持久化随宿主界面顺序文件（如 `config/op_order.json` 的 `Pinned` 数组），不要另发明存储。
 
 ### 文件基础操作（文件类界面标配）
 - **Ctrl+C** 复制选中文件引用；**Ctrl+V** 粘贴为「原名 副本」（解锁可编辑，重名自动递增 -副本N）。

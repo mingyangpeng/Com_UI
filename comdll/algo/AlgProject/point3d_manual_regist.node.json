@@ -1,0 +1,65 @@
+{
+  "node": {
+    "id": "alg.point3d.manual_regist",
+    "name": "手动配准(ICP)",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "两片点云按初始变换+选定策略做 ICP 精配准；初始变换可用 Point3DAlg_RegistTool.exe 键盘粗调后导出；变换矩阵并入节点消息输出"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiManualRegist",
+  "inputs": [
+    { "name": "源点云", "type": "cloud" },
+    { "name": "目标点云", "type": "cloud" }
+  ],
+  "params": [
+    {
+      "name": "strategy",
+      "label": "配准策略(1-6)",
+      "type": "int",
+      "default": 1,
+      "min": 1,
+      "max": 6
+    },
+    {
+      "name": "init_transform",
+      "label": "初始变换(16值逗号分隔)",
+      "type": "text",
+      "default": "1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1"
+    },
+    {
+      "name": "max_distance",
+      "label": "对应点距离(mm,0=自适应)",
+      "type": "number",
+      "default": 0.0,
+      "min": 0.0
+    },
+    {
+      "name": "max_iteration",
+      "label": "最大迭代",
+      "type": "int",
+      "default": 60,
+      "min": 1
+    }
+  ],
+  "outputs": [
+    { "name": "配准点云", "type": "cloud" }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/tools/Point3DAlg_Regist.h",
+      "src/Point3DAlg/tools/Point3DAlg_Regist.cpp",
+      "src/ShapelyAlg/ShapelyAlg.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools",
+      "src/ShapelyAlg"
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "node": {
+    "id": "alg.image2d.analyze_contours",
+    "name": "轮廓测量",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "轮廓几何量测量：输出叠加包围框(绿)+最小外接圆(黄)，结果并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiAnalyzeContours",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "external_only",
+      "label": "只取外轮廓",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 1
+    },
+    {
+      "name": "min_area",
+      "label": "最小面积",
+      "type": "number",
+      "default": 1,
+      "min": 0,
+      "max": 10000000
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "node": {
+    "id": "alg.image2d.canny",
+    "name": "Canny 边缘",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "Canny 边缘检测，输出二值边缘图"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiCanny",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "threshold1",
+      "label": "低阈值",
+      "type": "number",
+      "default": 50,
+      "min": 0,
+      "max": 1000
+    },
+    {
+      "name": "threshold2",
+      "label": "高阈值",
+      "type": "number",
+      "default": 150,
+      "min": 0,
+      "max": 1000
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

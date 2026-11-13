@@ -1,0 +1,76 @@
+{
+  "node": {
+    "id": "business.bump_ng_check",
+    "name": "bump高度NG判定",
+    "group": "业务算子",
+    "category": "处理",
+    "description": "业务编排示例：基准/被测点云各自拟合拱形球顶 bump（Point3DAlg_DomeFit），一对一匹配后按高度差判 NG（Point3DAlg_BumpCompare）；输出每配对一点（z=高度偏差）+ 判定统计"
+  },
+  "runtime": "native",
+  "assembly": "BusinessAlg.dll",
+  "method": "BusinessAlg_ComuiBumpNgCheck",
+  "inputs": [
+    {
+      "name": "基准点云",
+      "type": "cloud"
+    },
+    {
+      "name": "被测点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "ng_threshold",
+      "label": "NG阈值(mm)",
+      "type": "number",
+      "default": 0.02,
+      "min": 0.0
+    },
+    {
+      "name": "match_radius",
+      "label": "XY匹配半径(mm)",
+      "type": "number",
+      "default": 0.3,
+      "min": 0.01
+    },
+    {
+      "name": "height_threshold",
+      "label": "bump判定高度(mm)",
+      "type": "number",
+      "default": 0.02,
+      "min": 0.0
+    },
+    {
+      "name": "cluster_tolerance",
+      "label": "bump聚类连通距离(mm)",
+      "type": "number",
+      "default": 0.25,
+      "min": 0.01
+    }
+  ],
+  "outputs": [
+    {
+      "name": "NG差异点云",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/BusinessAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/BusinessAlg/include/BusinessAlg_api.h",
+      "src/BusinessAlg/BusinessAlg_Region.cpp",
+      "src/Point3DAlg/tools/Point3DAlg_DomeFit.h",
+      "src/Point3DAlg/tools/Point3DAlg_DomeFit.cpp",
+      "src/Point3DAlg/tools/Point3DAlg_FitUtil.h",
+      "src/ShapelyAlg/ShapelyAlg.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools",
+      "src/ShapelyAlg"
+    ]
+  }
+}
