@@ -112,21 +112,32 @@ public static class NativeAlgoAbi
 /// 由宿主在**插件加载时**按 JSON 声明创建（= 自动生成的调用壳），第三方零 C# 代码。
 /// 线程安全：可在任意后台线程调用（无 UI 依赖）。
 /// </summary>
-public sealed class NativeAlgoInvoker
+public sealed class NativeAlgoInvoker : IDisposable
 {
     private readonly NativeAlgoAbi.AlgoMainDelegate _main;
     private readonly NativeAlgoAbi.AlgoFreeDelegate? _free;
     private readonly string _entry;
+    private IntPtr _lib;   // 保存句柄：Dispose 时 Free（否则每次重载泄漏一个 OS 模块并锁死 DLL 文件）
 
     /// <summary>从 DLL 加载入口（algo_free 缺省时为 null，输出缓冲将不释放——DLL 按约定必须导出）。</summary>
     public NativeAlgoInvoker(string dllPath, string entry)
     {
         _entry = entry;
-        var lib = NativeLibrary.Load(dllPath);
-        var mainPtr = NativeLibrary.GetExport(lib, entry);
+        _lib = NativeLibrary.Load(dllPath);
+        var mainPtr = NativeLibrary.GetExport(_lib, entry);
         _main = Marshal.GetDelegateForFunctionPointer<NativeAlgoAbi.AlgoMainDelegate>(mainPtr);
-        if (NativeLibrary.TryGetExport(lib, "algo_free", out var freePtr))
+        if (NativeLibrary.TryGetExport(_lib, "algo_free", out var freePtr))
             _free = Marshal.GetDelegateForFunctionPointer<NativeAlgoAbi.AlgoFreeDelegate>(freePtr);
+    }
+
+    /// <summary>释放原生库句柄（宿主卸载/重载时调用；调用中的执行由宿主侧串行化保证已完成）。</summary>
+    public void Dispose()
+    {
+        if (_lib != IntPtr.Zero)
+        {
+            NativeLibrary.Free(_lib);
+            _lib = IntPtr.Zero;
+        }
     }
 
     /// <summary>委托注入构造（测试/进程内模拟原生实现用——签名须遵守统一 C ABI）。</summary>
@@ -158,9 +169,19 @@ public sealed class NativeAlgoInvoker
             if (rc != 0)
             {
                 var err = output.Error != IntPtr.Zero ? Marshal.PtrToStringUTF8(output.Error) : null;
+                FreeDllBuffers(ref output);   // 失败路径也按约定释放（DLL 可能已部分分配）
                 throw new Exception($"原生算子 {_entry} 失败（返回码 {rc}）: {err ?? "（DLL 未提供错误消息）"}");
             }
-            var result = ReadOutput(ref output);
+            (List<ImagePayload> Images, List<CloudPayload> Clouds) result;
+            try
+            {
+                result = ReadOutput(ref output);   // 校验失败也必须先释放 DLL 缓冲再抛——否则每次失败调用漏一次内存
+            }
+            catch
+            {
+                FreeDllBuffers(ref output);
+                throw;
+            }
             FreeDllBuffers(ref output);
             return result;
         }

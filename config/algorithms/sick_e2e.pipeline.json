@@ -1,6 +1,7 @@
 {
   "Name": "sick_e2e",
   "Locked": false,
+  "IsOperator": true,
   "Nodes": [
     {
       "Id": "sicksrc01",
@@ -10,7 +11,7 @@
       "Y": 60,
       "Params": {
         "folder": "Z:\\ScanImage\\3D",
-        "step": 4
+        "step": 64
       }
     },
     {
@@ -20,7 +21,7 @@
       "X": 360,
       "Y": 60,
       "Params": {
-        "leaf_size": 0.02
+        "leaf_size": 0.05
       }
     }
   ],

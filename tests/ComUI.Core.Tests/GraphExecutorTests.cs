@@ -139,4 +139,188 @@ public class GraphExecutorTests
         Assert.True(failed);
         Assert.Contains("算法内部错误", msg);
     }
+
+    // ==================== 流程控制（for/while/switch） ====================
+
+    [Fact]
+    public async Task FlowFor_Loop_RerunsDownstream_PerIteration()
+    {
+        // flow.for(0..3) → 探针：整图按迭代序列跑 3 次，下游探针每次都真实执行
+        var (defC, probeC) = Def("flowtest.consumer");
+        var g = new GraphDocument();
+        var loop = Node("flow.for");
+        loop.Params["起始"] = 0;
+        loop.Params["终止"] = 3;
+        loop.Params["步长"] = 1;
+        var consumer = Node(defC.Id);
+        g.AddNode(loop);
+        g.AddNode(consumer);
+        g.Connect(loop.Id, "计数", consumer.Id, "输入");
+
+        var (failed, msg) = await Run(g);
+        Assert.False(failed, msg);
+        Assert.Equal(3, probeC.Runs);   // 3 次迭代 = 下游执行 3 次
+    }
+
+    [Fact]
+    public async Task FlowSwitch_RoutesToSelectedPortOnly()
+    {
+        // switch(分支=1)：出口0 的下游跳过（上游无产出），出口1 的下游执行
+        // 探针产出 ImagePayload → 用图像型分支；消费者必须带输入端口（跳过语义按连线判定）
+        var (defS, src) = Def("flowtest.src");
+        var inPort = new PortDef { Name = "输入", Type = PortType.Image };
+        var (def0, c0) = Def("flowtest.out0", inPort);
+        var (def1, c1) = Def("flowtest.out1", inPort);
+        var g = new GraphDocument();
+        var srcNode = Node(defS.Id);
+        var sw = Node("flow.switch_image");
+        sw.Params["分支"] = 1;
+        var out0 = Node(def0.Id);
+        var out1 = Node(def1.Id);
+        g.AddNode(srcNode);
+        g.AddNode(sw);
+        g.AddNode(out0);
+        g.AddNode(out1);
+        g.Connect(srcNode.Id, "输出", sw.Id, "输入");
+        g.Connect(sw.Id, "出口0", out0.Id, "输入");
+        g.Connect(sw.Id, "出口1", out1.Id, "输入");
+
+        var (failed, msg) = await Run(g);
+        Assert.False(failed, msg);
+        Assert.Equal(0, c0.Runs);    // 未选中分支 → 整段跳过
+        Assert.Equal(1, c1.Runs);    // 选中分支 → 执行
+    }
+
+    [Fact]
+    public async Task FlowLoop_StepZero_DoesNotHang()
+    {
+        // 步长=0 防死循环：迭代上限兜底（执行可完成）
+        var (defZero, probeZero) = Def("flowtest.zero");
+        var g = new GraphDocument();
+        var loop = Node("flow.for");
+        loop.Params["起始"] = 0;
+        loop.Params["终止"] = 10;
+        loop.Params["步长"] = 0;
+        var consumer = Node(defZero.Id);
+        g.AddNode(loop);
+        g.AddNode(consumer);
+        g.Connect(loop.Id, "计数", consumer.Id, "输入");
+
+        var (failed, msg) = await Run(g);
+        Assert.False(failed, msg);
+        Assert.Equal(10, probeZero.Runs);   // 步长=0 按 1 处理 → 0..9 共 10 次（不死循环）
+    }
+
+    [Fact]
+    public async Task Presets_BindInputNodeOutput_ForSubPipeline()
+    {
+        // 预置输出（子流程算子的输入绑定）：预置源节点输出 → 下游收到预置值而非空产出
+        CloudPayload? seen = null;
+        var (defSrc2, _) = Def("flowtest.src2");
+        var def = new NodeDef
+        {
+            Id = "flowtest.observer",
+            Name = "observer", Category = "处理",
+            Inputs = new[] { new PortDef { Name = "输入", Type = PortType.Cloud } },
+            Outputs = new[] { new PortDef { Name = "输出", Type = PortType.Cloud } },
+            Execute = ctx => { seen = ctx.Inputs.TryGetValue("输入", out var v) ? v as CloudPayload : null; return new Dictionary<string, object?>(); },
+        };
+        NodeDefs.Register(def);
+
+        var g = new GraphDocument();
+        var src = Node("flowtest.src2");
+        var observer = Node("flowtest.observer");
+        g.AddNode(src);
+        g.AddNode(observer);
+        g.Connect(src.Id, "输出", observer.Id, "输入");
+
+        var payload = new CloudPayload { Count = 7 };
+        var presets = new Dictionary<(string, string), object?> { [(src.Id, "输出")] = payload };
+        try
+        {
+            GraphExecutor.busPublish = (_, _) => { };
+            await GraphExecutor.RunAsync(g, (_, _, _) => { }, _ => { }, CancellationToken.None, presets);
+        }
+        catch { }
+        Assert.Same(payload, seen);
+    }
+
+    internal const int MaxIterationsForTest = 10000;
+
+    [Fact]
+    public async Task FlowWhile_StepOvershoot_StopsBounded()
+    {
+        // while 步进越过终止值（0→100 步长 3 永远命不中 100）→ 越过即停，不跑满上限的垃圾迭代
+        var (defConsumer, probeConsumer) = Def("flowtest.whilecons");
+        var g = new GraphDocument();
+        var loop = Node("flow.while");
+        loop.Params["起始"] = 0;
+        loop.Params["终止"] = 100;
+        loop.Params["步长"] = 3;
+        var consumer = Node(defConsumer.Id);
+        g.AddNode(loop);
+        g.AddNode(consumer);
+        g.Connect(loop.Id, "计数", consumer.Id, "输入");
+
+        var (failed, msg) = await Run(g);
+        Assert.False(failed, msg);
+        Assert.Equal(34, probeConsumer.Runs);   // 0,3,…,99 → 34 次即停
+    }
+
+    [Fact]
+    public async Task FlowFor_MultipleLoops_EachUsesOwnSequence()
+    {
+        // 两个循环节点：各自按自身参数算序列（短者钳位在末值），迭代总数取最大
+        var (defA, probeA) = Def("flowtest.multiA");
+        var (defB, probeB) = Def("flowtest.multiB");
+        var g = new GraphDocument();
+        var loopA = Node("flow.for");
+        loopA.Params["起始"] = 0;
+        loopA.Params["终止"] = 2;
+        loopA.Params["步长"] = 1;
+        var loopB = Node("flow.for");
+        loopB.Params["起始"] = 0;
+        loopB.Params["终止"] = 5;
+        loopB.Params["步长"] = 1;
+        var ca = Node(defA.Id);
+        var cb = Node(defB.Id);
+        g.AddNode(loopA);
+        g.AddNode(loopB);
+        g.AddNode(ca);
+        g.AddNode(cb);
+        g.Connect(loopA.Id, "计数", ca.Id, "输入");
+        g.Connect(loopB.Id, "计数", cb.Id, "输入");
+
+        var (failed, msg) = await Run(g);
+        Assert.False(failed, msg);
+        Assert.Equal(5, probeB.Runs);   // 总迭代 = 最长序列
+        Assert.Equal(5, probeA.Runs);   // 短序列节点同样每次迭代执行（其计数输出钳位在末值）
+    }
+
+    [Fact]
+    public async Task FlowFor_Scope_SourceRunsOnce_BodyRunsPerIteration()
+    {
+        // 作用域 = 循环节点下游闭包：源（作用域外）只执行一次；循环体（作用域内）每次迭代执行。
+        // 作用域标记 = 从「计数」画到体首节点的控制连线，与数据连线共存（控制边不传数据）。
+        var (defSrc, srcProbe) = Def("flowtest.scopesrc");
+        var inPort = new PortDef { Name = "输入", Type = PortType.Image };
+        var (defBody, bodyProbe) = Def("flowtest.scopebody", inPort);
+        var g = new GraphDocument();
+        var src = Node(defSrc.Id);
+        var loop = Node("flow.for");
+        loop.Params["起始"] = 0;
+        loop.Params["终止"] = 3;
+        loop.Params["步长"] = 1;
+        var body = Node(defBody.Id);
+        g.AddNode(src);
+        g.AddNode(loop);
+        g.AddNode(body);
+        g.Connect(src.Id, "输出", body.Id, "输入");          // 数据连线
+        g.Connect(loop.Id, "计数", body.Id, "输入");          // 作用域标记（控制边，共存）
+
+        var (failed, msg) = await Run(g);
+        Assert.False(failed, msg);
+        Assert.Equal(1, srcProbe.Runs);      // 作用域外：只执行一次
+        Assert.Equal(3, bodyProbe.Runs);     // 作用域内：每次迭代执行
+    }
 }

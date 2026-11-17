@@ -297,16 +297,18 @@ public sealed class GlCloudRenderer : IDisposable
             GL.BindVertexArray(0);
             _entities[id] = e;
         }
-        e.Cap = count;
         e.Count = 0;
         e.BoundsMin = boundsMin;
         e.BoundsMax = boundsMax;
         if (BackgroundUpload)
         {
             // worker：原生拷贝（托管数组→NativeMemory）+ 一次性 BufferData；UI 零阻塞
+            // 注意：Cap 不得在 UI 线程提前改——显存缓冲要等 worker BeginUploadGl 分配并设置，
+            // 提前放大 Cap 会让 SetRevealed/DrawArrays 越界读旧尺寸缓冲（GPU 未定义行为）
             _jobs?.Add(new UploadJob { Ent = e, Begin = true, Count = count, Pts = points, Col = colorsRgb, BoundsMin = boundsMin, BoundsMax = boundsMax });
             return;
         }
+        e.Cap = count;   // 同步路径：缓冲已分配，Cap 立即生效
         GL.BindVertexArray(e.Vao);
         GL.BindBuffer(BufferTarget.ArrayBuffer, e.PosVbo);
         GL.BufferData(BufferTarget.ArrayBuffer, count * 12, IntPtr.Zero, BufferUsageHint.StaticDraw);
@@ -369,7 +371,7 @@ public sealed class GlCloudRenderer : IDisposable
         _entities[newId] = e;
     }
 
-    public void RemoveEntity(string id)
+    public unsafe void RemoveEntity(string id)
     {
         if (!_entities.TryGetValue(id, out var e)) return;
         _entities.Remove(id);
@@ -391,6 +393,9 @@ public sealed class GlCloudRenderer : IDisposable
             }
             catch { }
         }
+        // 同步回退分支同样释放非托管点/色缓冲（worker 死亡后不再有 DeleteEntityGl 代劳）
+        if (e.NativePts != 0) { NativeMemory.Free((void*)e.NativePts); e.NativePts = 0; }
+        if (e.NativeCol != 0) { NativeMemory.Free((void*)e.NativeCol); e.NativeCol = 0; }
     }
 
     // ==================== 绘制 ====================
@@ -540,7 +545,11 @@ void main() {
         try
         {
             _jobs?.CompleteAdding();
-            _uploadWorker?.Join(2000);   // worker 退出并释放共享上下文后才能销毁 GL 资源
+            // worker 退出并释放共享上下文后才能销毁 GL 资源——Join(2000) 超时后必须继续等：
+            // 大云（1.2GB 拷贝）在途时提前释放会与 worker 并发写已释放原生内存（堆破坏/AV）
+            if (_uploadWorker is not null)
+                while (_uploadWorker.IsAlive)
+                    if (!_uploadWorker.Join(500)) continue;
         }
         catch { }
         if (_ok)

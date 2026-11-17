@@ -13,7 +13,9 @@ public sealed class HostAlgoRunContext : IAlgoRunContext
         LogService log, Action<string>? setStatus)
     {
         Title = title;
-        Params = parameters;
+        // 大小写不敏感：JSON 声明名与方法参数名的匹配链路是忽略大小写的（camelCase/PascalCase 混用常见），
+        // 最终字典查找若区分大小写会出现"声明检查通过、运行时缺参数"的分裂
+        Params = new Dictionary<string, object?>(parameters, StringComparer.OrdinalIgnoreCase);
         _log = log;
         _setStatus = setStatus;
     }

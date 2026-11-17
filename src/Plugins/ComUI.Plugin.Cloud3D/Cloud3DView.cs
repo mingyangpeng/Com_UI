@@ -413,6 +413,10 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
 
     // ==================== 点云实体管理 ====================
 
+    /// <summary>矢量三分量全部有限（NaN/Infinity 毒化防护）。</summary>
+    private static bool IsFinite(Vector3 v) =>
+        float.IsFinite(v.X) && float.IsFinite(v.Y) && float.IsFinite(v.Z);
+
     /// <summary>同 Id 重发=更新（重新分块上传），新 Id=新增并取景。</summary>
     public void SetCloud(int count, float[] points, byte[]? colorsRgb, string? source, string? id)
     {
@@ -421,16 +425,28 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         bool isNew = !_clouds.ContainsKey(cloudId);
         var data0 = isNew ? null : _clouds[cloudId];
 
+        // 同 Id 重发更小点云：清空拾取/选区引用（否则拾取标记按旧索引越界崩溃）
+        if (_pickedCloud == cloudId && _pickedIndex >= count)
+        {
+            _pickedCloud = null;
+            _pickedIndex = -1;
+        }
+
         // 采样估算边界（步长 64）：仅用于立即取景；精确边界由分块上传逐点合并
+        // NaN/Infinity 毒化防护：非有限分量跳过（一个坏点会让 Bounds 变 NaN → 相机/裁剪全 NaN 整个视图空白）
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
+        bool anyFinite = false;
         for (int i = 0; i < count; i += 64)
         {
-            min = Vector3.ComponentMin(min, new Vector3(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]));
-            max = Vector3.ComponentMax(max, new Vector3(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]));
+            var p = new Vector3(points[i * 3], points[i * 3 + 1], points[i * 3 + 2]);
+            if (!IsFinite(p)) continue;
+            min = Vector3.ComponentMin(min, p);
+            max = Vector3.ComponentMax(max, p);
+            anyFinite = true;
         }
+        if (!anyFinite) return;   // 全部无效点：不入库（避免 NaN 边界毒化相机）
         min = Vector3.ComponentMin(min, new Vector3(points[0], points[1], points[2]));
-        max = Vector3.ComponentMax(max, new Vector3(points[0], points[1], points[2]));
 
         if (isNew)
         {
@@ -454,7 +470,10 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         };
         data.Xform = data0?.Xform ?? data.Xform;   // 更新：保留实体已有变换；新建=单位阵
         data.Locked = data0?.Locked ?? false;      // 更新：保留锁标志（同 Id 重发不清锁）
+        data.SingleColor = data0?.SingleColor ?? data.SingleColor;   // 更新：保留单色设置（重发不丢样式）
         _clouds[cloudId] = data;
+        // 实体壳先创建（BeginUpload），样式/变换后设——顺序反了首帧发布会丢样式（实体尚不存在）
+        _renderer.BeginUpload(cloudId, count, min, max, data.Pts, data.Col);
         _renderer.SetEntityStyle(cloudId, data.ColorMode, data.PointSize, data.SingleColor);
         _renderer.SetEntityTransform(cloudId, data.Xform);
 
@@ -462,6 +481,7 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         {
             _target = (min + max) / 2;
             _fitRadius = Math.Max(0.01f, (max - min).Length / 2);
+            if (!float.IsFinite(_fitRadius)) _fitRadius = 10f;   // NaN 兜底（坏点毒化边界时整视图永久空白）
             ResetView();
         }
 
@@ -476,7 +496,6 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
             _idleTimer.Tick += (_, _) => { _interacting = false; _idleTimer?.Stop(); Draw(); };
         }
 
-        _renderer.BeginUpload(cloudId, count, min, max, data.Pts, data.Col);
         _uploadTimer.Stop();
         _uploadTimer.Start();
         UpdateCloudInfoText();
@@ -501,8 +520,10 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
             var max = data.BoundsMax;
             for (int i = data.Loaded; i < data.Loaded + n; i++)
             {
-                min = Vector3.ComponentMin(min, new Vector3(data.Pts[i * 3], data.Pts[i * 3 + 1], data.Pts[i * 3 + 2]));
-                max = Vector3.ComponentMax(max, new Vector3(data.Pts[i * 3], data.Pts[i * 3 + 1], data.Pts[i * 3 + 2]));
+                var p = new Vector3(data.Pts[i * 3], data.Pts[i * 3 + 1], data.Pts[i * 3 + 2]);
+                if (!IsFinite(p)) continue;   // NaN 毒化防护：坏点不进边界（否则 min/max 全 NaN 渲染异常）
+                min = Vector3.ComponentMin(min, p);
+                max = Vector3.ComponentMax(max, p);
             }
             data.BoundsMin = min;
             data.BoundsMax = max;
@@ -608,10 +629,13 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
             Source = src.Source,
             ColorMode = src.ColorMode,
             PointSize = src.PointSize,
+            SingleColor = src.SingleColor,                // 复制单色（此前丢失：副本落到默认色）
         };
+        data.Xform = (double[])src.Xform.Clone();         // 复制变换矩阵（此前丢失：副本落回单位阵）
         _clouds[newId] = data;
         _renderer.BeginUpload(newId, data.Count, data.BoundsMin, data.BoundsMax, data.Pts, data.Col);
-        _renderer.SetEntityStyle(newId, data.ColorMode, data.PointSize);
+        _renderer.SetEntityStyle(newId, data.ColorMode, data.PointSize, data.SingleColor);
+        _renderer.SetEntityTransform(newId, data.Xform);
         _uploadTimer.Stop();
         _uploadTimer.Start();
         UpdateCloudInfoText();
@@ -944,8 +968,11 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
 
     private void UpdatePickMark()
     {
-        if (_pickedIndex < 0 || _pickedCloud is null || !_clouds.TryGetValue(_pickedCloud, out var c))
+        if (_pickedIndex < 0 || _pickedCloud is null || !_clouds.TryGetValue(_pickedCloud, out var c) ||
+            _pickedIndex >= c.Count)   // 同 Id 重发更小点云后旧索引越界——清引用防崩溃
         {
+            _pickedCloud = null;
+            _pickedIndex = -1;
             _pickMark.IsVisible = false;
             return;
         }

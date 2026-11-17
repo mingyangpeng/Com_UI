@@ -127,6 +127,7 @@ public static class NodeJsonRegistry
                 Name = json.Node.Name,
                 Category = string.IsNullOrWhiteSpace(json.Node.Category) ? "处理" : json.Node.Category,
                 Group = string.IsNullOrWhiteSpace(json.Node.Group) ? "通用" : json.Node.Group,
+                Description = string.IsNullOrWhiteSpace(json.Node.Description) ? null : json.Node.Description,
                 Inputs = json.Inputs.Select(p => new PortDef { Name = p.Name, Type = ParseType(p.Type) }).ToArray(),
                 Outputs = json.Outputs.Select(p => new PortDef { Name = p.Name, Type = ParseType(p.Type) }).ToArray(),
                 Params = json.Params.Select(p => new AlgoParam

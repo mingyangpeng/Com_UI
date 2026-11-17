@@ -90,5 +90,6 @@ public partial class MainWindow
         leaf.ActivePanelId = key;
         RebuildSplitView();
         SelectTab(tab);
+        _redocking = false;   // ★复位：此后浮动窗 ✕ 恢复正常清理（不复位会让 OnFloatClosed 跳过登记清理 → doc 页会话复活成孤儿）
     }
 }

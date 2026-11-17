@@ -35,6 +35,10 @@ public sealed class AlgoRecord
     public required IAlgoContext AlgoContext { get; init; }
     public required List<AlgoCommand> Commands { get; init; }
     public bool IsJsonDriven { get; init; }
+    /// <summary>手写壳实例（JSON 驱动为 null）——卸载/重载前须调用其 Shutdown。</summary>
+    public IAlgoPlugin? Instance { get; init; }
+    /// <summary>JSON 原生算子的库句柄清理委托（NativeAlgoInvoker.Dispose）——卸载/重载时调用。</summary>
+    public Action? OnShutdown { get; init; }
 }
 
 /// <summary>
@@ -53,8 +57,8 @@ public sealed class PluginManager
     private readonly List<AlgoRecord> _algoPlugins = new();
     private readonly List<PluginLoadContext> _contexts = new();
 
-    public IReadOnlyList<UiPluginRecord> UiPlugins => _uiPlugins;
-    public IReadOnlyList<AlgoRecord> AlgoPlugins => _algoPlugins;
+    public IReadOnlyList<UiPluginRecord> UiPlugins => _uiPlugins.ToList();
+    public IReadOnlyList<AlgoRecord> AlgoPlugins => _algoPlugins.ToList();
 
     /// <summary>UI 插件上下文创建完成（供宿主订阅 OpenDocument 等请求）。</summary>
     public event Action<IPluginContext>? UiContextCreated;
@@ -132,10 +136,10 @@ public sealed class PluginManager
         var folderName = Path.GetFileName(folder.TrimEnd(Path.DirectorySeparatorChar));
         var alc = new PluginLoadContext(folderName, folder, FindMainDll(folder));
         _contexts.Add(alc);
+        UiPluginRecord? record = null;   // 提到 try 外：中途失败清理需要引用已 Initialize 的实例
 
         try
         {
-            UiPluginRecord? record = null;
             var dlls = Directory.EnumerateFiles(folder, "*.dll", SearchOption.TopDirectoryOnly).ToList();
             _log.Debug($"[{folderName}] 尝试 {dlls.Count} 个 DLL");
             foreach (var dll in dlls)
@@ -199,6 +203,11 @@ public sealed class PluginManager
         catch (Exception ex)
         {
             _log.Error($"UI 插件加载失败 {folderName}: {ex.Message}");
+            // 中途失败清理：已 Initialize 的实例（常已订阅总线）必须 Shutdown，ALC 必须卸载——
+            // 否则死订阅继续收帧 + ALC 被闭包钉住（卸载完整性检查会报 BUG-039 场景）
+            try { record?.Instance.Shutdown(); } catch { /* 尽力清理 */ }
+            TryUnload(alc);
+            _contexts.Remove(alc);
         }
     }
 
@@ -216,6 +225,7 @@ public sealed class PluginManager
         var alc = new PluginLoadContext(folderName, folder, FindMainDll(folder));
         _contexts.Add(alc);
         var used = false;
+        IAlgoPlugin? initialized = null;   // 提到 try 外：中途失败清理需要引用已 Initialize 的实例
 
         try
         {
@@ -238,6 +248,7 @@ public sealed class PluginManager
                         var instance = (IAlgoPlugin)Activator.CreateInstance(t)!;
                         var ctx = new HostAlgoContext(attr.Id, _log, _bus) { PluginFolder = folder };
                         instance.Initialize(ctx);
+                        initialized = instance;
 
                         _algoPlugins.Add(new AlgoRecord
                         {
@@ -245,6 +256,7 @@ public sealed class PluginManager
                             Description = attr.Description, Folder = folder,
                             Context = alc, AlgoContext = ctx,
                             Commands = instance.GetCommands().ToList(),
+                            Instance = instance,
                         });
                         used = true;
                         _log.Info($"算法插件已加载: {attr.Name} v{attr.Version} <{attr.Id}>（{instance.GetCommands().Count()} 个命令）");
@@ -265,8 +277,9 @@ public sealed class PluginManager
                         new JsonSerializerOptions { ReadCommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
                     if (json is null) continue;
 
-                    var cmd = GenericAlgoRunner.Create(json, folder, alc, _bus, _log);
-                    if (cmd is null) continue;
+                    var created = GenericAlgoRunner.Create(json, folder, alc, _bus, _log);
+                    if (created is null) continue;
+                    var (cmd, cleanup) = created.Value;
 
                     _algoPlugins.Add(new AlgoRecord
                     {
@@ -275,6 +288,7 @@ public sealed class PluginManager
                         Context = alc, AlgoContext = new HostAlgoContext(json.Plugin.Id, _log, _bus) { PluginFolder = folder },
                         Commands = new List<AlgoCommand> { cmd },
                         IsJsonDriven = true,
+                        OnShutdown = cleanup,
                     });
                     used = true;
                     _log.Info($"算法(JSON)已加载: {json.Plugin.Name} v{json.Plugin.Version} <{json.Plugin.Id}> ← {Path.GetFileName(jsonFile)}");
@@ -295,6 +309,10 @@ public sealed class PluginManager
         catch (Exception ex)
         {
             _log.Error($"算法插件加载失败 {folderName}: {ex.Message}");
+            // 中途失败清理：已 Initialize 的实例（常已订阅总线）必须 Shutdown，ALC 必须卸载
+            try { initialized?.Shutdown(); } catch { /* 尽力清理 */ }
+            TryUnload(alc);
+            _contexts.Remove(alc);
         }
     }
 
@@ -307,7 +325,13 @@ public sealed class PluginManager
             try { p.Instance.Shutdown(); }
             catch (Exception ex) { _log.Warn($"UI 插件 {p.Name} Shutdown 异常: {ex.Message}"); }
         }
-        // JSON 算法无状态，手写壳也没有统一 Shutdown 之外的资源（IAlgoPlugin.Shutdown 已在实例上）
+        foreach (var a in _algoPlugins)
+        {
+            try { a.Instance?.Shutdown(); }
+            catch (Exception ex) { _log.Warn($"算法插件 {a.Name} Shutdown 异常: {ex.Message}"); }
+            try { a.OnShutdown?.Invoke(); }
+            catch (Exception ex) { _log.Warn($"算法插件 {a.Name} 原生库清理异常: {ex.Message}"); }
+        }
         var unloaded = _contexts.Where(c => c is not null).ToList();
         var refs = unloaded.Select(c => new WeakReference(c)).ToList();
         foreach (var ctx in unloaded)

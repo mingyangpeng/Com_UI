@@ -93,13 +93,29 @@ public static class CppExporter
             }
         }
 
-        // 2) 生成 main.cpp + ABI 头 + CMakeLists
+        // 2) 运行时 DLL（第三方依赖：opencv/pcl/geos/OpenNI2 等）——拷进 runtime/，
+        //    CMake POST_BUILD 复制到 exe 目录（加载器在 exe 同目录找到，导出工程开箱即跑）
+        var runtimeDlls = new List<string>();
+        foreach (var dir in sourceBaseDirs.Values.Distinct())
+        {
+            foreach (var dll in Directory.EnumerateFiles(dir, "*.dll"))
+                if (!runtimeDlls.Any(d => d.EndsWith(Path.GetFileName(dll), StringComparison.OrdinalIgnoreCase)))
+                    runtimeDlls.Add(dll);
+        }
+        if (runtimeDlls.Count > 0)
+        {
+            Directory.CreateDirectory(Path.Combine(outputDir, "runtime"));
+            foreach (var dll in runtimeDlls)
+                File.Copy(dll, Path.Combine(outputDir, "runtime", Path.GetFileName(dll)), true);
+        }
+
+        // 3) 生成 main.cpp + ABI 头 + CMakeLists
         // C++ 源文件带 UTF-8 BOM：MSVC 对无 BOM 的 UTF-8 按 ANSI/GBK 误读，中文注释的字节
         // 会把 #endif 等预处理行"吃掉"（实测报"意外的 #endif"）——BOM 是 MSVC 识别 UTF-8 的唯一开关
         var bomUtf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: true);
         File.WriteAllText(Path.Combine(outputDir, "comui_native_abi.h"), AbiHeader(), bomUtf8);
-        File.WriteAllText(Path.Combine(outputDir, "main.cpp"), MainCpp(nodes, srcMap, sourceNodes), bomUtf8);
-        File.WriteAllText(Path.Combine(outputDir, "CMakeLists.txt"), CMake(programName, copiedFiles, includeDirs, modules, needsOpenCv, needsGeos), bomUtf8);
+        File.WriteAllText(Path.Combine(outputDir, "main.cpp"), MainCpp(graph, nodes, srcMap, sourceNodes), bomUtf8);
+        File.WriteAllText(Path.Combine(outputDir, "CMakeLists.txt"), CMake(programName, copiedFiles, includeDirs, modules, needsOpenCv, needsGeos, runtimeDlls.Count > 0), bomUtf8);
 
         if (copyErrors.Count > 0)
             return "以下源码文件未找到（node.json source.files 路径错误）：" + string.Join("、", copyErrors);
@@ -206,6 +222,7 @@ public static class CppExporter
             var to = graph.FindNode(c.ToNode);
             if (from is null || to is null) continue;
             if (!nameOf.TryGetValue(from.Id, out var v)) continue;
+            if (NodeDefs.Map[from.DefId].Id is "flow.for" or "flow.while") continue;   // 控制边不传数据
             map[(to.Id, c.ToPort)] = (v, NodeDefs.Map[from.DefId], c.FromPort);
         }
         return map;
@@ -213,7 +230,7 @@ public static class CppExporter
 
     // ==================== 代码生成 ====================
 
-    private static string MainCpp(List<(NodeInstance Node, string Var)> nodes,
+    private static string MainCpp(GraphDocument graph, List<(NodeInstance Node, string Var)> nodes,
         Dictionary<(string Node, string Port), (string Var, NodeDef Def, string OutPort)> srcMap,
         Dictionary<string, NodeJsonRegistry.NativeSourceMeta> sourceNodes)
     {
@@ -240,10 +257,15 @@ public static class CppExporter
             sb.AppendLine();
         }
 
-        // ---- 每节点：有源码 = 直调；无源码/内置 = TODO 桩 ----
+        // ---- 每节点：有源码 = 直调；无源码/内置 = TODO 桩；flow 控制节点 = 循环块（不生成函数） ----
         foreach (var (node, var) in nodes)
         {
             var def = NodeDefs.Map[node.DefId];
+            if (node.DefId is "flow.for" or "flow.while")
+            {
+                sb.AppendLine($"// flow 控制节点 {def.Name} —— main 中生成真实 C++ 循环（作用域=下游闭包）");
+                continue;
+            }
             sb.AppendLine($"// ==================== {def.Name}（{node.Id[..6]}）====================");
             if (sourceNodes.TryGetValue(node.Id, out var meta))
                 EmitSourceCall(sb, node, def, var, meta, srcMap);
@@ -252,13 +274,63 @@ public static class CppExporter
             sb.AppendLine();
         }
 
-        // ---- main：按拓扑序依次调用 + 末尾输出汇总（成功路径的可见反馈） ----
+        // ---- main：按拓扑序展开；flow.for/while 节点生成真实 C++ 循环（作用域=下游闭包，嵌套自动处理） ----
+        var flowVars = nodes.Where(kv => kv.Node.DefId is "flow.for" or "flow.while")
+                            .ToDictionary(kv => kv.Var, kv => kv.Node);
+        var closureOf = new Dictionary<string, HashSet<string>>();   // flow 节点 → 下游闭包节点 Id 集
+        foreach (var kv in nodes.Where(kv => flowVars.ContainsKey(kv.Var)))
+        {
+        var closure = new HashSet<string> { kv.Node.Id };
+        var q = new Queue<NodeInstance>();
+        q.Enqueue(kv.Node);
+        while (q.Count > 0)
+        {
+            var cur = q.Dequeue();
+            foreach (var c in graph.Connections.Where(c => c.FromNode == cur.Id))
+            {
+                var nxt = graph.Nodes.FirstOrDefault(n2 => n2.Id == c.ToNode);
+                if (nxt is null || !closure.Add(nxt.Id)) continue;
+                q.Enqueue(nxt);
+            }
+        }
+        closure.Remove(kv.Node.Id);   // 自身不进闭包（由 for 块自身承载）
+        closureOf[kv.Node.Id] = closure;
+        }
+
+        var emittedCalls = new HashSet<string>();
+        void EmitCalls(StringBuilder sb, List<(NodeInstance Node, string Var)> seq)
+        {
+            foreach (var (node, var) in seq)
+            {
+                if (!emittedCalls.Add(var)) continue;
+                if (flowVars.TryGetValue(var, out var loopNode))
+                {
+                    int start = loopNode.Params.TryGetValue("起始", out var sv) && sv is int s1 ? s1 : 0;
+                    int end = loopNode.Params.TryGetValue("终止", out var ev) && ev is int e1 ? e1 : 10;
+                    int step = loopNode.Params.TryGetValue("步长", out var tv) && tv is int t1 ? t1 : 1;
+                    if (step == 0) step = 1;
+                    var cmp = step > 0 ? "<" : ">";
+                    var iv = "i_" + var;
+                    var closureIds = closureOf[node.Id];
+                    sb.AppendLine($"    // flow 循环：作用域 {closureIds.Count} 个节点，计数变量 {iv}");
+                    sb.AppendLine($"    for (int {iv} = {start}; {iv} {cmp} {end}; {iv} += {step}) {{");
+                    EmitCalls(sb, nodes.Where(p2 => closureIds.Contains(p2.Node.Id)).ToList());
+                    sb.AppendLine("    }");
+                }
+                else
+                {
+                    sb.AppendLine($"    {var}_run();");
+                }
+            }
+        }
+
         sb.AppendLine("int main() {");
-        foreach (var (node, var) in nodes)
-            sb.AppendLine($"    {var}_run();");
+        EmitCalls(sb, nodes);
         foreach (var (node, var) in nodes)
         {
             var def = NodeDefs.Map[node.DefId];
+            if (node.DefId is "flow.for" or "flow.while")
+                continue;   // flow 控制节点无数据输出（计数在循环日志可见），不参与汇总
             for (int i = 0; i < def.Outputs.Length; i++)
             {
                 var unit = def.Outputs[i].Type == PortType.Image ? "px" : "点";
@@ -432,7 +504,7 @@ public static class CppExporter
     }
 
     private static string CMake(string programName, HashSet<string> copiedFiles, List<string> includeDirs,
-        HashSet<string> modules, bool needsOpenCv, bool needsGeos)
+        HashSet<string> modules, bool needsOpenCv, bool needsGeos, bool hasRuntimeDlls)
     {
         var safe = new string(programName.Select(ch => char.IsLetterOrDigit(ch) ? ch : '_').ToArray());
         var sb = new StringBuilder();
@@ -509,6 +581,17 @@ public static class CppExporter
                 sb.AppendLine($"target_link_directories({safe} PRIVATE \"{geosLib}\")");
                 sb.AppendLine($"target_link_libraries({safe} PRIVATE geos_c.lib)");
             }
+        }
+        // 运行时依赖 DLL（opencv/pcl/geos/OpenNI2 等）构建后自动复制到 exe 目录——开箱即跑
+        if (hasRuntimeDlls)
+        {
+            sb.AppendLine();
+            sb.AppendLine("# 运行时依赖 DLL：构建后复制到 exe 目录");
+            sb.AppendLine($"add_custom_command(TARGET {safe} POST_BUILD");
+            sb.AppendLine("    COMMAND ${CMAKE_COMMAND} -E copy_directory");
+            sb.AppendLine("    \"${CMAKE_SOURCE_DIR}/runtime\"");
+            sb.AppendLine("    $<TARGET_FILE_DIR:" + safe + ">");
+            sb.AppendLine(")");
         }
         return sb.ToString();
     }

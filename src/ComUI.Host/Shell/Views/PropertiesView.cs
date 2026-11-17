@@ -17,6 +17,7 @@ public sealed class PropertiesView : UserControl
     private readonly StackPanel _hostProps = new();
 
     private static readonly Brush Dim = new SolidColorBrush(Color.FromRgb(0x9D, 0x9D, 0x9D));
+    private static readonly Brush Header = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xEC));   // Apple 式节标题：近白，层次高于内容
 
     /// <summary>用户点击标题栏收起按钮（宿主折叠右侧属性列）。</summary>
     public event Action? CollapseRequested;
@@ -24,7 +25,7 @@ public sealed class PropertiesView : UserControl
     public PropertiesView()
     {
         var head = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto"), Margin = new Thickness(12, 10, 8, 0) };
-        head.Children.Add(new TextBlock { Text = "属性", FontWeight = FontWeight.SemiBold, FontSize = 12, Foreground = Dim, VerticalAlignment = VerticalAlignment.Center });
+        head.Children.Add(new TextBlock { Text = "属性", FontWeight = FontWeight.SemiBold, FontSize = 13, Foreground = Header, VerticalAlignment = VerticalAlignment.Center });
         var collapse = new Button
         {
             Content = "▷",
@@ -42,7 +43,7 @@ public sealed class PropertiesView : UserControl
         Grid.SetColumn(collapse, 1);
         head.Children.Add(collapse);
 
-        _paramsHeader = new TextBlock { Text = "参数", FontWeight = FontWeight.SemiBold, FontSize = 12, Foreground = Dim, Margin = new Thickness(14, 12, 0, 0), IsVisible = false };
+        _paramsHeader = new TextBlock { Text = "参数", FontWeight = FontWeight.SemiBold, FontSize = 12, Foreground = Header, Margin = new Thickness(14, 14, 0, 0), IsVisible = false };
         _paramsSep = new Separator { Margin = new Thickness(12, 10, 12, 10), IsVisible = false };
 
         var root = new ScrollViewer
@@ -52,12 +53,12 @@ public sealed class PropertiesView : UserControl
         };
         var panel = (StackPanel)root.Content!;
         panel.Children.Add(head);
-        panel.Children.Add(new TextBlock { Text = "面板", FontWeight = FontWeight.SemiBold, FontSize = 12, Foreground = Dim, Margin = new Thickness(14, 10, 0, 0) });
+        panel.Children.Add(new TextBlock { Text = "面板", FontWeight = FontWeight.SemiBold, FontSize = 12, Foreground = Header, Margin = new Thickness(14, 12, 0, 0) });
         panel.Children.Add(_panelProps);
         panel.Children.Add(_paramsHeader);
         panel.Children.Add(_paramsHost);
         panel.Children.Add(_paramsSep);
-        panel.Children.Add(new TextBlock { Text = "宿主信息", FontWeight = FontWeight.SemiBold, FontSize = 12, Foreground = Dim, Margin = new Thickness(14, 0, 0, 0) });
+        panel.Children.Add(new TextBlock { Text = "宿主信息", FontWeight = FontWeight.SemiBold, FontSize = 12, Foreground = Header, Margin = new Thickness(14, 0, 0, 0) });
         panel.Children.Add(_hostProps);
         Content = root;
     }
@@ -89,7 +90,7 @@ public sealed class PropertiesView : UserControl
 
     private static Control MakeRow(string key, string value)
     {
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("86,*"), Margin = new Thickness(14, 3, 10, 3) };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("96,*"), Margin = new Thickness(14, 4, 10, 4) };
         grid.Children.Add(new TextBlock
         {
             Text = key,

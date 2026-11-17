@@ -13,7 +13,8 @@ namespace ComUI.Core;
 /// </summary>
 public static class GenericAlgoRunner
 {
-    public static AlgoCommand? Create(AlgoJsonDescriptor json, string folder,
+    /// <returns>命令 + 卸载清理委托（null=无原生库句柄需释放）。</returns>
+    public static (AlgoCommand? Command, Action? Cleanup)? Create(AlgoJsonDescriptor json, string folder,
                                       PluginLoadContext? alc, IBus bus, LogService log)
     {
         try
@@ -23,7 +24,7 @@ public static class GenericAlgoRunner
             if (json.Runtime.Equals("native", StringComparison.OrdinalIgnoreCase))
                 return CreateNative(json, folder, bus, log);
 
-            return CreateDotNet(json, folder, alc, bus, log);
+            return (CreateDotNet(json, folder, alc, bus, log), null);
         }
         catch (Exception ex)
         {
@@ -232,7 +233,7 @@ public static class GenericAlgoRunner
 
     // ==================== native 运行时（C++ DLL + 统一 C ABI，宿主按 JSON 自动 marshal） ====================
 
-    private static AlgoCommand CreateNative(AlgoJsonDescriptor json, string folder, IBus bus, LogService log)
+    private static (AlgoCommand Command, Action Cleanup) CreateNative(AlgoJsonDescriptor json, string folder, IBus bus, LogService log)
     {
         var dllPath = Path.Combine(folder, json.Assembly);
         if (!File.Exists(dllPath))
@@ -241,15 +242,20 @@ public static class GenericAlgoRunner
             throw new Exception("runtime=native 需要 method");
 
         // 加载时按 JSON 自动生成调用壳（统一 C ABI：参数/图像/点云 marshal + algo_free 释放约定）
+        // cancel 声明检查：native 取消注入尚未实现——声明了取消的算子给出可见警告（否则"取消"按钮静默失效）
+        if (json.Cancel is { } c && !string.Equals(c.Mode, "none", StringComparison.OrdinalIgnoreCase))
+            log.Warn($"[{json.Plugin.Id}] runtime=native 的取消声明（cancel.mode={c.Mode}）暂未实现——运行中取消按钮对该算子无效");
+
         var invoker = new ComUI.Sdk.Native.NativeAlgoInvoker(dllPath, json.Method);
 
-        return new AlgoCommand
+        var cmd = new AlgoCommand
         {
             Id = json.Plugin.Id + ".run",
             Title = json.Plugin.Name,
             Params = json.Params.Count == 0 ? null : json.Params.Select(ToSdkParam).ToList(),
             Execute = ctx => Task.Run(() => InvokeNative(json, invoker, bus, log, ctx)),
         };
+        return (cmd, invoker.Dispose);   // 原生库句柄清理（宿主卸载/重载时调用，否则泄漏 OS 模块并锁死 DLL）
     }
 
     /// <summary>native 执行：参数按声明顺序取值；总线输入按主题取最新帧（图像/点云）；

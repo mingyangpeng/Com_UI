@@ -7,6 +7,7 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using ComUI.Sdk;
 using ComUI.Sdk.Ui;
 
 namespace ComUI.Plugin.NodeGraph;
@@ -20,11 +21,13 @@ namespace ComUI.Plugin.NodeGraph;
 /// 栏目头：按下-移动超 5px = 排序拖拽（落点横线指示），原地点击 = 折叠/展开；搜索过滤时禁用排序。
 /// 栏目头右端图钉（PinGlyph）：按下（蓝竖钉）= 该栏目钉住禁拖，拔起（灰斜钉）= 可拖动排序。
 /// 栏目顺序与图钉状态持久化在 config/op_order.json（旧版纯数组格式自动兼容）。
+/// 单击算子行 = 右侧属性面板显示该算子（说明+参数编辑+加入画布，IPanelParamsProvider 自更新控件）；
+/// 拖拽 = 直接放置（用面板当前参数）。
 /// </summary>
-public sealed class NodeLibraryView : UserControl, IDisposable
+public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProvider
 {
 
-    /// <summary>单击（非拖拽）某算子时触发，参数 = 节点类型 Id。</summary>
+    /// <summary>属性面板「加入画布」按钮触发（参数 = 节点类型 Id；面板参数覆盖由宿主读取应用）。</summary>
     public event Action<string>? OperatorClicked;
 
     /// <summary>拖拽算子松手时触发（指针捕获式，进程内可靠），参数 = 节点类型 Id + 屏幕坐标。</summary>
@@ -33,6 +36,10 @@ public sealed class NodeLibraryView : UserControl, IDisposable
     private readonly HashSet<string> _collapsedGroups = new();
     private readonly HashSet<string> _pinnedGroups = new();    // 图钉按下的栏目（禁拖，持久化）
     private string _filter = "";
+    private string? _selectedDefId;                            // 属性面板当前显示的算子 Id（单击行切换）
+    /// <summary>算子参数覆盖（面板里编辑的值）：defId → 参数名 → 文本。加入画布时由宿主应用到新节点。</summary>
+    public IReadOnlyDictionary<string, Dictionary<string, string>> ParamOverrides => _paramOverrides;
+    private readonly Dictionary<string, Dictionary<string, string>> _paramOverrides = new();
     private readonly List<string> _groupOrder = new();        // 栏目显示顺序（拖拽排序，持久化）
     private readonly Dictionary<string, Border> _headerIndex = new();   // 栏目名 → 头（视觉顺序，命中用）
     private readonly Dictionary<string, Border> _pinIndex = new();      // 栏目名 → 图钉命中区
@@ -380,6 +387,98 @@ public sealed class NodeLibraryView : UserControl, IDisposable
 
     // ==================== 算子条目 ====================
 
+    /// <summary>算子属性面板（行下展开）：说明 + 参数编辑器 + 「加入画布」。
+    /// 参数编辑值存 _paramOverrides——加入画布时由宿主应用到新节点（覆盖算子默认值）。</summary>
+    // ==================== 右侧属性面板（IPanelParamsProvider） ====================
+
+    private TextBlock? _paramsTitle;
+    private TextBlock? _paramsDesc;
+    private StackPanel? _paramsEditorHost;
+    private Button? _paramsAddBtn;
+
+    /// <summary>右侧属性面板的算子内容（自更新控件实例——行点击原地刷新，宿主零改动）。
+    /// 未选中时显示提示；选中后显示说明 + 参数编辑器 + 「加入画布」。</summary>
+    public Control? CreateParamsContent()
+    {
+        var root = new StackPanel { Spacing = 6 };
+        _paramsTitle = new TextBlock { FontSize = 12, FontWeight = FontWeight.SemiBold };
+        _paramsDesc = new TextBlock { FontSize = 11, Foreground = Dim, TextWrapping = TextWrapping.Wrap };
+        _paramsEditorHost = new StackPanel { Spacing = 6 };
+        _paramsAddBtn = new Button
+        {
+            Content = "➕ 加入画布",
+            Classes = { "ghost" },
+            FontSize = 11,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        _paramsAddBtn.Click += (_, _) => { if (_selectedDefId is not null) OperatorClicked?.Invoke(_selectedDefId); };
+        root.Children.Add(_paramsTitle);
+        root.Children.Add(_paramsDesc);
+        root.Children.Add(_paramsEditorHost);
+        root.Children.Add(_paramsAddBtn);
+        RefreshParamsContent();
+        return root;
+    }
+
+    /// <summary>行点击：把选中算子的说明/参数编辑器刷新进右侧属性面板（编辑值写 _paramOverrides）。</summary>
+    private void RefreshParamsContent()
+    {
+        if (_paramsTitle is null || _paramsDesc is null || _paramsEditorHost is null || _paramsAddBtn is null)
+            return;
+        _paramsEditorHost.Children.Clear();
+        if (_selectedDefId is null || !NodeDefs.Map.TryGetValue(_selectedDefId, out var def))
+        {
+            _paramsTitle.Text = "未选中算子";
+            _paramsDesc.Text = "单击算子行查看说明并设置参数";
+            _paramsAddBtn.IsVisible = false;
+            return;
+        }
+        _paramsTitle.Text = def.Name;
+        _paramsDesc.Text = string.IsNullOrEmpty(def.Description) ? def.Id : def.Description;
+        _paramsAddBtn.IsVisible = true;
+
+        var overrides = _paramOverrides.TryGetValue(def.Id, out var ov) ? ov : new Dictionary<string, string>();
+        if (!_paramOverrides.ContainsKey(def.Id)) _paramOverrides[def.Id] = overrides;
+        foreach (var p in def.Params)
+        {
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("76,*") };
+            row.Children.Add(new TextBlock
+            {
+                Text = p.Label,
+                FontSize = 11,
+                Foreground = Dim,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            Control editor;
+            var current = overrides.TryGetValue(p.Name, out var ovText) && ovText is not null ? ovText : p.Default?.ToString() ?? "";
+            switch (p.Type)
+            {
+                case ComUI.Sdk.AlgoParamType.Boolean:
+                    var cb = new CheckBox { IsChecked = current == "True" || current == "true", HorizontalAlignment = HorizontalAlignment.Left };
+                    cb.IsCheckedChanged += (_, _) => overrides[p.Name] = cb.IsChecked == true ? "true" : "false";
+                    editor = cb;
+                    break;
+                case ComUI.Sdk.AlgoParamType.Enum when p.Options is { } opts:
+                    var combo = new ComboBox { MinHeight = 24, FontSize = 11 };
+                    foreach (var o in opts) combo.Items.Add(o);
+                    combo.SelectedIndex = Math.Max(0, opts.ToList().IndexOf(current));
+                    combo.SelectionChanged += (_, _) => overrides[p.Name] = combo.SelectedItem?.ToString() ?? "";
+                    editor = combo;
+                    break;
+                default:
+                    var tb = new TextBox { Text = current, MinHeight = 24, FontSize = 11.5, Padding = new Thickness(6, 1, 6, 1) };
+                    tb.TextChanged += (_, _) => overrides[p.Name] = tb.Text;
+                    editor = tb;
+                    break;
+            }
+            editor.SetValue(Grid.ColumnProperty, 1);
+            row.Children.Add(editor);
+            _paramsEditorHost.Children.Add(row);
+        }
+        if (def.Params.Length == 0)
+            _paramsEditorHost.Children.Add(new TextBlock { Text = "本算子无参数", FontSize = 11, Foreground = Dim });
+    }
+
     private Control OperatorRow(NodeDef def)
     {
         var defId = def.Id;
@@ -421,7 +520,9 @@ public sealed class NodeLibraryView : UserControl, IDisposable
             }
             else
             {
-                OperatorClicked?.Invoke(defId);
+                // 单击 = 右侧属性面板显示该算子（说明+参数编辑+加入画布）——不再直接建节点
+                _selectedDefId = defId;
+                RefreshParamsContent();
             }
         };
 
@@ -463,10 +564,10 @@ public sealed class NodeLibraryView : UserControl, IDisposable
 
         return new Border
         {
-            Height = 28,
+            Height = 30,
             Background = Brushes.Transparent,
-            Margin = new Thickness(8, 0, 8, 0),
-            CornerRadius = new CornerRadius(4),
+            Margin = new Thickness(8, 1, 8, 1),
+            CornerRadius = new CornerRadius(6),
             Cursor = new Cursor(StandardCursorType.Hand),
             Child = content,
         };

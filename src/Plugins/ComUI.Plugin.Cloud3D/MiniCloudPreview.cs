@@ -30,21 +30,25 @@ internal sealed class MiniCloudPreview : ICloudPreview
 
     public void SetCloud(CloudPayload payload)
     {
-        _count = payload.Count;
+        // Count 与数组长度不一致时钳制（上游发布异常载荷防越界崩溃）
+        var count = payload.Count;
+        if (payload.Points.Length < count * 3)
+            count = payload.Points.Length / 3;
+        _count = count;
         var min = new Vector3(
             payload.Points.Length > 0 ? payload.Points[0] : 0,
             payload.Points.Length > 2 ? payload.Points[1] : 0,
             payload.Points.Length > 5 ? payload.Points[2] : 0);
         var max = min;
         // 采样估界（预览卡不需要精确值——精确边界见工作台）
-        var step = Math.Max(1, payload.Count / 4096);
-        for (int i = 0; i < payload.Count; i += step)
+        var step = Math.Max(1, count / 4096);
+        for (int i = 0; i < count; i += step)
         {
             float x = payload.Points[i * 3], y = payload.Points[i * 3 + 1], z = payload.Points[i * 3 + 2];
             if (x < min.X) min.X = x; if (y < min.Y) min.Y = y; if (z < min.Z) min.Z = z;
             if (x > max.X) max.X = x; if (y > max.Y) max.Y = y; if (z > max.Z) max.Z = z;
         }
-        _view.SetCloud(payload.Count, payload.Points, payload.ColorsRgb,
+        _view.SetCloud(count, payload.Points, payload.ColorsRgb,
             payload.Source is null ? "预览" : payload.Source + "（预览）", payload.Id ?? "预览");
     }
 

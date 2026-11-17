@@ -27,6 +27,12 @@ public partial class MainWindow : Window
 
     private readonly LogService _log = new();
     private readonly DataBus _bus = new();
+
+    static MainWindow()
+    {
+        // 总线投递异常接入日志（订阅者回调 bug 不再静默/不再炸发布方线程）
+        DataBus.DeliveryError = m => App.UiLog?.Error(m);
+    }
     private readonly PluginManager _manager;
 
     private readonly LogView _logView = new();
@@ -214,6 +220,8 @@ public partial class MainWindow : Window
 
     private void BuildActivityBar()
     {
+        _activeSidebar = null;   // 重载后旧条目引用全失效——复位避免"再次点击=收起"误折叠侧边栏
+
         _activityBar.Children.Clear();
         _activityButtons.Clear();
         _activityEntries.Clear();
@@ -497,9 +505,15 @@ public partial class MainWindow : Window
 
     private async void ReloadPlugins_Click(object? sender, RoutedEventArgs e) => await ReloadPluginsAsync();
 
+    private bool _reloadingPlugins;   // F5 fire-and-forget 无 in-flight 标志：连按两次会并发 ReloadAll（List 状态损坏/ALC 双重卸载）
+
     private async Task ReloadPluginsAsync()
     {
-        SetStatus("正在重新加载插件…");
+        if (_reloadingPlugins) { SetStatus("插件正在重载中…"); return; }
+        _reloadingPlugins = true;
+        try
+        {
+            SetStatus("正在重新加载插件…");
         CloseAllTabs();
         _panelViews.Clear();
         ApplyHostConfig();
@@ -510,6 +524,8 @@ public partial class MainWindow : Window
         AutoOpenPanels();
         ReportMissingRequired();
         SetStatus("插件重载完成");
+        }
+        finally { _reloadingPlugins = false; }
     }
 
     private void OpenAll_Click(object? sender, RoutedEventArgs e)

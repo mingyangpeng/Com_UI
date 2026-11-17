@@ -29,7 +29,7 @@ namespace ComUI.Plugin.NodeGraph;
 /// 卡片右下角把手拖拽拉伸宽度（ComfyUI 式：高度恒为内容自适应、预览随宽放大、字号不变；持久化 Width）；
 /// 修改参数/连线后自动按拓扑序重跑整图，结果经数据总线发布。
 /// </summary>
-public sealed class NodeEditorView : UserControl, IDisposable
+public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvider
 {
         // ===== 卡片布局常量（端口中心位置按此精确计算） =====
     private const double CardW = 210, HeaderH = 28, BodyPad = 8, RowH = 24, ParamH = 30, PortD = 12;
@@ -90,6 +90,9 @@ public sealed class NodeEditorView : UserControl, IDisposable
     private Button _saveBtn = null!;
     private Button _runBtn = null!;    // 运行状态视觉反馈：运行中变绿
     private Button _stopBtn = null!;   // 运行状态视觉反馈：空闲置灰禁用
+    private Button _toOperatorBtn = null!;   // 转为算子：已是算子后按钮文案反馈
+    /// <summary>卡片参数显示刷新回调：(节点Id, 参数名) → 设置卡片编辑器显示。右侧属性面板编辑时调用。</summary>
+    private readonly Dictionary<(string NodeId, string Param), Action<string>> _paramRefreshers = new();
 
     private static readonly IBrush RunActiveBrush = new SolidColorBrush(Color.FromRgb(0x2E, 0x8B, 0x3E));
     private const long MinRunVisibleMs = 600;   // 运行态最短可见时长（瞬间完成的流水线也保持反馈）
@@ -103,6 +106,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
     private CancellationTokenSource? _runCts;
 
     private static readonly Brush Hairline = new SolidColorBrush(Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF));
+    private static readonly Brush DimText = new SolidColorBrush(Color.FromRgb(0x9D, 0x9D, 0x9D));
 
     public NodeEditorView(IBus bus, Action<string> log)
     {
@@ -228,7 +232,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
 
     private Control BuildToolbar()
     {
-        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        var bar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
 
         // ＋ 添加节点 / 示例图 已移除（用户定案）：建节点走算子库拖拽/单击；示例不再预置
         var runBtn = Ghost("▶ 运行");
@@ -272,9 +276,14 @@ public sealed class NodeEditorView : UserControl, IDisposable
         exportCppBtn.Click += (_, _) => _ = ExportCppAsync();
         bar.Children.Add(exportCppBtn);
 
+        var toOpBtn = Ghost("⬆ 转为算子");
+        toOpBtn.Click += (_, _) => _ = ToOperatorAsync();
+        _toOperatorBtn = toOpBtn;
+        bar.Children.Add(toOpBtn);
+
         bar.Children.Add(new TextBlock
         {
-            Text = "从算子库拖入/单击建节点 · 拖动端口连线（输出可分叉多路） · 单击选中卡片 · Del/右键删除 · 拖动已连输入=换源 · 空白处拖动平移 · 滚轮缩放",
+            Text = "从算子库拖入建节点 · 单击算子行=属性面板（参数编辑后加入画布） · 拖动端口连线 · Del/右键删除 · 空白处拖动平移 · 滚轮缩放",
             VerticalAlignment = VerticalAlignment.Center,
             FontSize = 11,
             Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x7C)),
@@ -286,7 +295,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
             Background = new SolidColorBrush(Color.FromRgb(0x23, 0x23, 0x26)),
             BorderBrush = new SolidColorBrush(Color.FromRgb(0x31, 0x31, 0x35)),
             BorderThickness = new Thickness(0, 0, 0, 1),
-            Padding = new Thickness(10, 7, 10, 7),
+            Padding = new Thickness(12, 8, 12, 8),
             Child = bar,
         };
     }
@@ -410,7 +419,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
 
     // ==================== 节点卡片 ====================
 
-    private void AddNode(string defId, double x, double y)
+    private NodeInstance AddNode(string defId, double x, double y)
     {
         var def = NodeDefs.Map[defId];
         var node = new NodeInstance { DefId = def.Id, X = Math.Max(8, x), Y = Math.Max(8, y) };
@@ -421,6 +430,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
         RedrawEdges();
         ScheduleAutoRun();
         _log($"添加节点「{def.Name}」");
+        return node;
     }
 
     /// <summary>draw 卡片内嵌预览：按 nodeId 路由到本页卡片（执行线程触发，封送 UI）。</summary>
@@ -523,7 +533,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
         {
             Background = headerBrush,
             Height = HeaderH,
-            CornerRadius = new CornerRadius(6, 6, 0, 0),
+            CornerRadius = new CornerRadius(8, 8, 0, 0),
             Padding = new Thickness(10, 0, 8, 0),
             Cursor = new Cursor(StandardCursorType.SizeAll),
         };
@@ -798,91 +808,6 @@ public sealed class NodeEditorView : UserControl, IDisposable
     /// <summary>自绘紧凑滑杆：轨道+填充+圆钮全自绘。模板 Slider 的圆钮在紧凑行里会被
     /// 相邻行盖掉下半（多次修复无效），自绘后布局完全可控。
     /// 返回 (控件, 外部设值)；changed 仅在用户交互（点击/拖拽）时回调。</summary>
-    private static (Control Control, Action<double> SetValue) BuildCompactSlider(double min, double max, double value, Action<double> changed)
-    {
-        const double Knob = 12, TrackH = 4, HostH = 20;
-        double _frac = Math.Clamp((value - min) / (max - min), 0, 1);
-
-        var rest = new Border
-        {
-            Height = TrackH, CornerRadius = new CornerRadius(2),
-            Background = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x5A)),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        var fill = new Border
-        {
-            Height = TrackH, CornerRadius = new CornerRadius(2),
-            Background = new SolidColorBrush(Color.FromRgb(0x4F, 0xC3, 0xF7)),
-            VerticalAlignment = VerticalAlignment.Center,
-        };
-        var knob = new Ellipse
-        {
-            Width = Knob, Height = Knob,
-            Fill = new SolidColorBrush(Color.FromRgb(0x4F, 0xC3, 0xF7)),
-        };
-        var canvas = new Canvas
-        {
-            Height = HostH, VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 10, 0),   // 与右侧数值框留出间距
-            Background = Brushes.Transparent,   // 透明 Brush 可命中测试
-        };
-        canvas.Children.Add(rest);
-        canvas.Children.Add(fill);
-        canvas.Children.Add(knob);
-
-        void Layout(double w)
-        {
-            rest.Width = Math.Max(0, w);
-            Canvas.SetLeft(rest, 0);
-            Canvas.SetTop(rest, (HostH - TrackH) / 2.0);
-            fill.Width = Math.Max(0, Math.Min(w, _frac * w));
-            Canvas.SetLeft(fill, 0);
-            Canvas.SetTop(fill, (HostH - TrackH) / 2.0);
-            Canvas.SetLeft(knob, Math.Max(0, Math.Min(w - Knob, _frac * (w - Knob))));
-            Canvas.SetTop(knob, (HostH - Knob) / 2.0);
-        }
-        canvas.SizeChanged += (_, e) => Layout(e.NewSize.Width);
-        canvas.AttachedToVisualTree += (_, _) => Layout(canvas.Bounds.Width);
-
-        void SetFromPointer(PointerEventArgs e)
-        {
-            var pos = e.GetPosition(canvas);
-            double f = Math.Clamp((pos.X - Knob / 2) / Math.Max(1, canvas.Bounds.Width - Knob), 0, 1);
-            if (Math.Abs(f - _frac) < 1e-9) return;
-            _frac = f;
-            Layout(canvas.Bounds.Width);
-            changed(min + f * (max - min));
-        }
-        bool dragging = false;
-        canvas.PointerPressed += (_, e) =>
-        {
-            if (!e.GetCurrentPoint(canvas).Properties.IsLeftButtonPressed) return;
-            dragging = true;
-            e.Pointer.Capture(canvas);
-            SetFromPointer(e);
-            e.Handled = true;
-        };
-        canvas.PointerMoved += (_, e) =>
-        {
-            if (!dragging) return;
-            SetFromPointer(e);
-            e.Handled = true;
-        };
-        canvas.PointerReleased += (_, e) =>
-        {
-            dragging = false;
-            e.Pointer.Capture(null);
-            e.Handled = true;
-        };
-
-        void SetValue(double v)
-        {
-            _frac = Math.Clamp((v - min) / (max - min), 0, 1);
-            Layout(canvas.Bounds.Width);
-        }
-
-        return (canvas, SetValue);
-    }
 
     private Control PortRow(NodeInstance node, PortDef port, bool isInput)
     {
@@ -964,110 +889,127 @@ public sealed class NodeEditorView : UserControl, IDisposable
         return row;
     }
 
-    private Control BuildParamEditor(NodeInstance node, ComUI.Sdk.AlgoParam p)
+    private Control BuildParamEditor(NodeInstance node, ComUI.Sdk.AlgoParam p, bool registerRefresher = true)
     {
         object? current = node.Params.TryGetValue(p.Name, out var v) ? v : p.Default;
+
+        // 编辑值写回节点参数 + 刷新卡片显示（右侧属性面板与卡片双向同步的桥）
+        void Write(object? val)
+        {
+            node.Params[p.Name] = val;
+            ScheduleAutoRun();
+            if (registerRefresher && _paramRefreshers.TryGetValue((node.Id, p.Name), out var refresh))
+                refresh(val?.ToString() ?? "");
+        }
+
+        Control editor;
         switch (p.Type)
         {
-            case ComUI.Sdk.AlgoParamType.Enum when p.Options is { Length: > 0 }:
+            case ComUI.Sdk.AlgoParamType.Enum when p.Options is { Length: > 0 } opts:
             {
                 var combo = new ComboBox
                 {
-                    ItemsSource = p.Options,
+                    ItemsSource = opts,
                     SelectedItem = current?.ToString(),
-                    MinHeight = 24,
+                    MinHeight = 26,
                     FontSize = 11.5,
                 };
-                combo.SelectionChanged += (_, _) =>
-                {
-                    node.Params[p.Name] = combo.SelectedItem?.ToString() ?? "";
-                    ScheduleAutoRun();
-                };
-                return combo;
+                combo.SelectionChanged += (_, _) => Write(combo.SelectedItem?.ToString() ?? "");
+                editor = combo;
+                break;
             }
-            case ComUI.Sdk.AlgoParamType.Int when p.Min is { } imin && p.Max is { } imax:
+            case ComUI.Sdk.AlgoParamType.Boolean:
             {
-                double curV = Convert.ToDouble(current ?? imin);
-                // 数值框：可手动输入（Enter/失焦提交，越界回落）；拖动滑杆时同步刷新
-                var box = new TextBox
+                var cb = new CheckBox
                 {
-                    Text = FormatNum(curV), FontSize = 11, MinWidth = 38, Height = 22,
-                    Padding = new Thickness(4, 1, 4, 1),
-                    HorizontalContentAlignment = HorizontalAlignment.Right,
-                    VerticalContentAlignment = VerticalAlignment.Center,
-                    Background = Brushes.Transparent, BorderThickness = new Thickness(0),   // 无框，只显数字
+                    IsChecked = current is bool b && b,
+                    HorizontalAlignment = HorizontalAlignment.Left,
+                    MinHeight = 22,
                 };
-                var (slider, setSliderV) = BuildCompactSlider(imin, imax, curV, nv =>
-                {
-                    curV = nv;
-                    node.Params[p.Name] = (int)Math.Round(nv);
-                    box.Text = FormatNum(nv);
-                    ScheduleAutoRun();
-                });
-                node.Params[p.Name] = (int)Math.Round(curV);
+                cb.IsCheckedChanged += (_, _) => Write(cb.IsChecked == true);
+                editor = cb;
+                break;
+            }
+            case ComUI.Sdk.AlgoParamType.Int:
+            {
+                int curV = Convert.ToInt32(current ?? 0);
+                var min = p.Min is { } imin ? (int)Math.Round(imin) : int.MinValue;
+                var max = p.Max is { } imax2 ? (int)Math.Round(imax2) : int.MaxValue;
+                var box = MakeNumBox(FormatNum(curV));
                 void Commit()
                 {
                     if (double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var nv))
                     {
-                        nv = Math.Clamp(nv, imin, imax);
-                        if (Math.Abs(nv - curV) > 1e-9) { setSliderV(nv); curV = nv; node.Params[p.Name] = (int)Math.Round(nv); box.Text = FormatNum(nv); ScheduleAutoRun(); }
+                        nv = Math.Clamp(Math.Round(nv), min, max);
+                        if (Math.Abs(nv - curV) > 1e-9) { curV = (int)nv; node.Params[p.Name] = curV; box.Text = FormatNum(curV); ScheduleAutoRun(); }
                         else box.Text = FormatNum(curV);
                     }
                     else box.Text = FormatNum(curV);
                 }
                 box.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Commit(); e.Handled = true; } };
                 box.LostFocus += (_, _) => Commit();
-                var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-                grid.Children.Add(slider);
-                box.SetValue(Grid.ColumnProperty, 1);
-                grid.Children.Add(box);
-                return grid;
+                editor = box;
+                break;
             }
-            case ComUI.Sdk.AlgoParamType.Number when p.Min is { } nmin && p.Max is { } nmax:
+            case ComUI.Sdk.AlgoParamType.Number:
             {
-                double curV = Convert.ToDouble(current ?? nmin);
-                var box = new TextBox
-                {
-                    Text = FormatNum(curV), FontSize = 11, MinWidth = 38, Height = 22,
-                    Padding = new Thickness(4, 1, 4, 1),
-                    HorizontalContentAlignment = HorizontalAlignment.Right,
-                    VerticalContentAlignment = VerticalAlignment.Center,
-                    Background = Brushes.Transparent, BorderThickness = new Thickness(0),   // 无框，只显数字
-                };
-                var (slider, setSliderV) = BuildCompactSlider(nmin, nmax, curV, nv =>
-                {
-                    curV = nv;
-                    node.Params[p.Name] = nv;
-                    box.Text = FormatNum(nv);
-                    ScheduleAutoRun();
-                });
-                node.Params[p.Name] = curV;
+                double curV = Convert.ToDouble(current ?? 0.0);
+                double min = p.Min ?? double.MinValue, max = p.Max ?? double.MaxValue;
+                var box = MakeNumBox(FormatNum(curV));
                 void Commit()
                 {
                     if (double.TryParse(box.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out var nv))
                     {
-                        nv = Math.Clamp(nv, nmin, nmax);
-                        if (Math.Abs(nv - curV) > 1e-9) { setSliderV(nv); curV = nv; node.Params[p.Name] = nv; box.Text = FormatNum(nv); ScheduleAutoRun(); }
+                        nv = Math.Clamp(nv, min, max);
+                        if (Math.Abs(nv - curV) > 1e-9) { curV = nv; node.Params[p.Name] = nv; box.Text = FormatNum(curV); ScheduleAutoRun(); }
                         else box.Text = FormatNum(curV);
                     }
                     else box.Text = FormatNum(curV);
                 }
                 box.KeyDown += (_, e) => { if (e.Key == Key.Enter) { Commit(); e.Handled = true; } };
                 box.LostFocus += (_, _) => Commit();
-                var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
-                grid.Children.Add(slider);
-                box.SetValue(Grid.ColumnProperty, 1);
-                grid.Children.Add(box);
-                return grid;
+                editor = box;
+                break;
             }
             default:
             {
-                var tb = new TextBox { Text = current?.ToString() ?? "", MinHeight = 24, FontSize = 11.5, Padding = new Thickness(6, 1, 6, 1) };
-                tb.TextChanged += (_, _) => { node.Params[p.Name] = tb.Text; ScheduleAutoRun(); };
-                return tb;
+                var tb = new TextBox { Text = current?.ToString() ?? "", MinHeight = 26, FontSize = 11.5, Padding = new Thickness(6, 2, 6, 2) };
+                tb.TextChanged += (_, _) => Write(tb.Text);
+                editor = tb;
+                break;
             }
         }
+
+        // 卡片显示刷新回调：右侧属性面板编辑时同步卡片数值（面板编辑为权威，卡片为显示）
+        if (registerRefresher)
+        {
+            _paramRefreshers[(node.Id, p.Name)] = display =>
+            {
+                switch (editor)
+                {
+                    case TextBox tb: tb.Text = display; break;
+                    case ComboBox cb when cb.Items.Cast<object>().Any(o => o?.ToString() == display):
+                        cb.SelectedItem = display; break;
+                    case CheckBox cb2: cb2.IsChecked = display == "True" || display == "true"; break;
+                }
+            };
+        }
+        return editor;
     }
+
+    /// <summary>参数输入框（统一输入模式：无滑杆；带浅底色的可编辑域样式）。</summary>
+    private static TextBox MakeNumBox(string text)
+    {
+        return new TextBox
+        {
+            Text = text,
+            FontSize = 11.5,
+            MinHeight = 26,
+            Padding = new Thickness(6, 2, 6, 2),
+            HorizontalContentAlignment = HorizontalAlignment.Right,
+        };
+    }
+
 
     private static string FormatNum(double v) => Math.Abs(v - Math.Round(v)) < 0.005
         ? Math.Round(v).ToString("F0")
@@ -1081,25 +1023,36 @@ public sealed class NodeEditorView : UserControl, IDisposable
         _nodesLayer.Children.Add(card);
     }
 
-    /// <summary>在当前视口中心添加一个节点（算子库单击时调用）。</summary>
-    public void AddNodeCentered(string defId)
+    /// <summary>在当前视口中心添加一个节点（算子库单击时调用）。返回新节点实例（算子库参数覆盖应用用）。</summary>
+    public NodeInstance? AddNodeCentered(string defId)
     {
         var c = ViewportCenter();
-        AddNode(defId, c.X - CardW / 2, c.Y - 30);
+        return AddNode(defId, c.X - CardW / 2, c.Y - 30);
     }
 
-    /// <summary>算子拖拽放置：按屏幕坐标落点创建节点（仅当落点在画布内）。</summary>
-    public void PlaceNodeAtScreen(string defId, PixelPoint screen)
+    /// <summary>「⬆ 转为算子」：把当前流水线标记为算子并保存——宿主启动/重载时注册进算子库
+    /// 「子流程」栏目（输入端口=图内需外部数据的节点端口，输出端口=末端节点输出），同步写参数配置文件。</summary>
+    private async Task ToOperatorAsync()
     {
-        if (_editor.GetVisualRoot() is null) { _log("请先切换到流水线页面再放置节点"); return; }
+        if (_readOnly) { _log("算法已锁定（只读），解锁或复制副本后才能转为算子"); return; }
+        if (_graph.Nodes.Count == 0) { _log("当前页面是空的，没有可转为算子的内容"); return; }
+        _graph.IsOperator = true;
+        await SaveOrCopyAsync();
+        _toOperatorBtn.Content = "⬆ 已是算子";
+    }
+
+    /// <summary>算子拖拽放置：按屏幕坐标落点创建节点（仅当落点在画布内）。返回新节点实例。</summary>
+    public NodeInstance? PlaceNodeAtScreen(string defId, PixelPoint screen)
+    {
+        if (_editor.GetVisualRoot() is null) { _log("请先切换到流水线页面再放置节点"); return null; }
         var client = _editor.PointToClient(screen);
         if (!_editor.Bounds.Contains(client))
         {
             _log("请在流水线画布区域内放置节点");
-            return;
+            return null;
         }
         var world = _world.PointToClient(screen);
-        AddNode(defId, world.X - CardW / 2, world.Y - 30);
+        return AddNode(defId, world.X - CardW / 2, world.Y - 30);
     }
 
     /// <summary>已保存算法拖拽放置：在落点展开整段编排。</summary>
@@ -1128,6 +1081,96 @@ public sealed class NodeEditorView : UserControl, IDisposable
         _selectedNode = nodeId;
         if (nodeId is { } id && _cards.TryGetValue(id, out var card))
             card.BorderBrush = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF));
+        RefreshNodeProps();   // 右侧属性面板：显示选中卡片的说明与参数（宿主持有本控件实例，原地刷新）
+    }
+
+    // ==================== 右侧属性面板（IPanelParamsProvider） ====================
+
+    private TextBlock? _nodePropsTitle;
+    private TextBlock? _nodePropsDesc;
+    private TextBlock? _nodePropsStatus;
+    private StackPanel? _nodePropsEditorHost;
+    private Button? _nodePropsDeleteBtn;
+
+    /// <summary>右侧属性面板内容（自更新控件实例——选中卡片原地刷新，宿主零改动）：
+    /// 选中卡片时显示名称/说明/状态/参数编辑器（编辑直接写节点参数并同步卡片显示）。</summary>
+    public Control? CreateParamsContent()
+    {
+        var root = new StackPanel { Spacing = 6 };
+        _nodePropsTitle = new TextBlock { FontSize = 12, FontWeight = FontWeight.SemiBold };
+        _nodePropsDesc = new TextBlock { FontSize = 11, Foreground = DimText, TextWrapping = TextWrapping.Wrap };
+        _nodePropsStatus = new TextBlock { FontSize = 11, TextWrapping = TextWrapping.Wrap, IsVisible = false };
+        _nodePropsEditorHost = new StackPanel { Spacing = 6 };
+        _nodePropsDeleteBtn = new Button
+        {
+            Content = "🗑 删除节点（Del）",
+            Classes = { "ghost" },
+            FontSize = 11,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        };
+        _nodePropsDeleteBtn.Click += (_, _) =>
+        {
+            if (_selectedNode is { } sel && !_readOnly) DeleteNode(sel);
+        };
+        root.Children.Add(_nodePropsTitle);
+        root.Children.Add(_nodePropsDesc);
+        root.Children.Add(_nodePropsStatus);
+        root.Children.Add(_nodePropsEditorHost);
+        root.Children.Add(_nodePropsDeleteBtn);
+        RefreshNodeProps();
+        return root;
+    }
+
+    /// <summary>选中卡片变化：刷新右侧面板（名称/说明/状态/参数编辑器——编辑直写节点参数并同步卡片）。</summary>
+    private void RefreshNodeProps()
+    {
+        if (_nodePropsTitle is null || _nodePropsDesc is null || _nodePropsEditorHost is null ||
+            _nodePropsDeleteBtn is null || _nodePropsStatus is null)
+            return;
+        _nodePropsEditorHost.Children.Clear();
+
+        if (_selectedNode is null || !_graph.Nodes.Any(n => n.Id == _selectedNode))
+        {
+            _nodePropsTitle.Text = "未选中算子卡片";
+            _nodePropsDesc.Text = "单击画布卡片查看说明并调节参数";
+            _nodePropsStatus.IsVisible = false;
+            _nodePropsDeleteBtn.IsVisible = false;
+            return;
+        }
+
+        var node = _graph.FindNode(_selectedNode)!;
+        var def = NodeDefs.Map[node.DefId];
+        _nodePropsTitle.Text = node.Title ?? def.Name;
+        _nodePropsDesc.Text = string.IsNullOrEmpty(def.Description) ? def.Id : def.Description;
+        _nodePropsDeleteBtn.IsVisible = !_readOnly;
+
+        // 状态行（错误红 / 运行黄 / 正常隐藏）
+        if (node.Status == NodeStatus.Error && !string.IsNullOrEmpty(node.Error))
+        {
+            _nodePropsStatus.Text = "⚠ " + node.Error;
+            _nodePropsStatus.Foreground = new SolidColorBrush(Color.FromRgb(0xF1, 0x4C, 0x4C));
+            _nodePropsStatus.IsVisible = true;
+        }
+        else _nodePropsStatus.IsVisible = false;
+
+        foreach (var p in def.Params)
+        {
+            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("76,*") };
+            row.Children.Add(new TextBlock
+            {
+                Text = p.Label,
+                FontSize = 11,
+                Foreground = DimText,
+                VerticalAlignment = VerticalAlignment.Center,
+            });
+            // 面板编辑器不注册卡片刷新回调（面板是权威），写节点参数后反向刷新卡片显示
+            var editor = BuildParamEditor(node, p, registerRefresher: false);
+            editor.SetValue(Grid.ColumnProperty, 1);
+            row.Children.Add(editor);
+            _nodePropsEditorHost.Children.Add(row);
+        }
+        if (def.Params.Length == 0)
+            _nodePropsEditorHost.Children.Add(new TextBlock { Text = "本算子无参数", FontSize = 11, Foreground = DimText });
     }
 
     /// <summary>选中/取消选中连线（高亮 + Del 删除目标切换；与节点选中互斥）。</summary>
@@ -1151,6 +1194,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
         _log($"删除节点「{NodeDefs.Map[node.DefId].Name}」");
         _graph.RemoveNode(nodeId);
         foreach (var k in _portDots.Keys.Where(k => k.NodeId == nodeId).ToList()) _portDots.Remove(k);
+        foreach (var k in _paramRefreshers.Keys.Where(k => k.NodeId == nodeId).ToList()) _paramRefreshers.Remove(k);
         if (_cards.Remove(nodeId, out var card)) _nodesLayer.Children.Remove(card);
         if (_dots.Remove(nodeId, out var dot)) _nodesLayer.Children.Remove(dot);
         RedrawEdges();
@@ -1448,13 +1492,33 @@ public sealed class NodeEditorView : UserControl, IDisposable
             var safe = string.Join("_", name.Split(IOPath.GetInvalidFileNameChars())).Trim();
             var path = IOPath.Combine(_algorithmsDir, safe + ".pipeline.json");
             await File.WriteAllTextAsync(path, _graph.Serialize(name));
+            WriteParamsConfig(path);
             AlgorithmSaved?.Invoke(name, path);
-            _log($"算法已保存: {name} → {path}");
+            _log($"算法已保存: {name} → {path}" + (_graph.IsOperator ? "（已转为算子，含参数配置文件）" : ""));
         }
         catch (Exception ex)
         {
             _log($"保存失败: {ex.Message}");
         }
+    }
+
+
+    /// <summary>保存同步写参数配置文件（<算子>.params.json）：各节点参数快照 + 是否已转为算子。
+    /// 宿主启动/重载据此把已转算子的流水线注册进算子库「子流程」栏目。</summary>
+    private void WriteParamsConfig(string pipelinePath)
+    {
+        var name = IOPath.GetFileNameWithoutExtension(pipelinePath).Replace(".pipeline", "");
+        var cfgPath = IOPath.Combine(IOPath.GetDirectoryName(pipelinePath)!, name + ".params.json");
+        var flat = new Dictionary<string, object?>();
+        foreach (var n in _graph.Nodes)
+        {
+            var label = n.Title ?? NodeDefs.Map[n.DefId].Name;
+            foreach (var kv in n.Params)
+                flat[$"{label}.{kv.Key}"] = kv.Value;
+        }
+        var cfg = new Dictionary<string, object?> { ["isOperator"] = _graph.IsOperator, ["params"] = flat };
+        File.WriteAllText(cfgPath, System.Text.Json.JsonSerializer.Serialize(cfg,
+            new System.Text.Json.JsonSerializerOptions { WriteIndented = true, Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
     }
 
     /// <summary>保存按钮 / Ctrl+S 的统一入口：锁定页 → 复制副本；已加载文件的页面 → 直接写回原文件；
@@ -1473,7 +1537,8 @@ public sealed class NodeEditorView : UserControl, IDisposable
         {
             var name = IOPath.GetFileNameWithoutExtension(LoadedPath!).Replace(".pipeline", "");
             File.WriteAllText(LoadedPath!, _graph.Serialize(name));
-            _log($"算法已保存: {name} → {LoadedPath}");
+            WriteParamsConfig(LoadedPath!);
+            _log($"算法已保存: {name} → {LoadedPath}" + (_graph.IsOperator ? "（含参数配置文件）" : ""));
         }
         catch (Exception ex)
         {
@@ -1500,6 +1565,7 @@ public sealed class NodeEditorView : UserControl, IDisposable
             _graph.Locked = false;   // 副本解锁
             await File.WriteAllTextAsync(path, _graph.Serialize(name));
             _graph.Locked = locked;
+            WriteParamsConfig(path);
             AlgorithmSaved?.Invoke(name, path);
             _bus.Publish(BusTopics.PipelineOpen, path);   // 新标签页打开可编辑副本
             _log($"已复制副本: {name} → {path}（解锁可编辑）");

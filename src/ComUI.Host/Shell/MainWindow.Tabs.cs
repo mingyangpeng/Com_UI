@@ -148,7 +148,7 @@ public partial class MainWindow
         var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
         header.Children.Add(new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center });
         var close = new Button { Content = "✕", Classes = { "tabclose" } };
-        var tab = new TabItem { Tag = key, Header = header, Content = content };
+        var tab = new TabItem { Tag = new PanelTag(key, title), Header = header, Content = content };   // ★PanelTag：CloseAllTabs/SyncPropsFor/关联联动的类型判据（此前赋 key 字符串导致三处全死）
         _tabTitles[key] = title;
         close.Click += (_, _) => CloseTab(tab);
         header.Children.Add(close);

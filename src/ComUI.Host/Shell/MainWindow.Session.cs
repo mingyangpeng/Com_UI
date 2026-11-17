@@ -35,7 +35,7 @@ public partial class MainWindow
             Height = Math.Clamp(w.H, 300, 2160);
             WindowStartupLocation = WindowStartupLocation.Manual;
             Position = new PixelPoint(x, y);
-            if (w.Maximized) WindowState = WindowState.Maximized;
+            WindowState = w.Maximized ? WindowState.Maximized : WindowState.Normal;   // 修复：窗口化偏好此前被 XAML Maximized 永久覆盖
         }
         catch { }
     }

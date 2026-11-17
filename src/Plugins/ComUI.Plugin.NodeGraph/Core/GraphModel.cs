@@ -9,6 +9,8 @@ public enum PortType
 {
     Image,
     Cloud,
+    /// <summary>控制端口（flow.for/while 的「计数」）：作用域标记边，不传数据——纯视觉区分（琥珀色）。</summary>
+    Control,
 }
 
 /// <summary>端口定义。</summary>
@@ -60,6 +62,8 @@ public sealed class NodeDef
 
     /// <summary>算子库分组栏目（如 "2D 图像"、"3D 点云"、"IO"），决定它在算子库中的归属。</summary>
     public string Group { get; init; } = "通用";
+    /// <summary>算子说明（node.json node.description / 内置算子手写）——算子库属性面板展示。</summary>
+    public string? Description { get; init; }
     public PortDef[] Inputs { get; init; } = Array.Empty<PortDef>();
     public PortDef[] Outputs { get; init; } = Array.Empty<PortDef>();
     public ComUI.Sdk.AlgoParam[] Params { get; init; } = Array.Empty<ComUI.Sdk.AlgoParam>();
@@ -69,7 +73,8 @@ public sealed class NodeDef
 /// <summary>画布上的一个节点实例。</summary>
 public sealed class NodeInstance
 {
-    public string Id { get; } = Guid.NewGuid().ToString("N")[..8];
+    /// <summary>可赋值：LoadFromJson 保留保存文件里的 Id——子流程参数键（节点 Id 锚定）跨加载稳定，改名不再失配。</summary>
+    public string Id { get; init; } = Guid.NewGuid().ToString("N")[..8];
     public required string DefId { get; init; }
     /// <summary>用户自定义标题（双击改名）；null = 显示算子名。</summary>
     public string? Title { get; set; }
@@ -103,6 +108,9 @@ public sealed class Connection
         /// <summary>算法文件锁定标志（随 JSON 持久化；锁定 = 只读打开，禁止修改）。</summary>
         public bool Locked { get; set; }
 
+        /// <summary>已转为算子库算子（随 JSON 持久化；宿主启动/重载时注册为「子流程」算子，保存同步写 params.json）。</summary>
+        public bool IsOperator { get; set; }
+
         public event Action? Changed;
 
     public NodeInstance? FindNode(string id) => Nodes.FirstOrDefault(n => n.Id == id);
@@ -123,9 +131,16 @@ public sealed class Connection
     }
 
     /// <summary>连接一个输入端口（同输入端口只允许一条连线，旧连线自动被替换）。</summary>
+    /// <summary>来源是否为流程控制节点（for/while）——其连线是「作用域标记」（控制边），
+    /// 不传数据：与数据连线共存，不触发输入端一对一换源。</summary>
+    public static bool IsFlowSource(string fromNode) =>
+        NodeDefs.Map.TryGetValue(fromNode, out var d) && d.Id is "flow.for" or "flow.while";
+
     public void Connect(string fromNode, string fromPort, string toNode, string toPort)
     {
-        DisconnectInput(toNode, toPort);   // 输入端一对一：接到已占用输入=换源；输出端允许一对多扇出
+        if (!IsFlowSource(fromNode))
+            DisconnectInput(toNode, toPort);   // 输入端一对一：接到已占用输入=换源；输出端允许一对多扇出
+        // 流程控制节点的连线（作用域标记）允许与数据连线共存——控制边不传数据
         Connections.Add(new Connection { FromNode = fromNode, FromPort = fromPort, ToNode = toNode, ToPort = toPort });
         Changed?.Invoke();
     }
@@ -138,6 +153,10 @@ public sealed class Connection
 
     public Connection? FindInputConnection(string toNode, string toPort) =>
         Connections.FirstOrDefault(c => c.ToNode == toNode && c.ToPort == toPort);
+
+    /// <summary>端口的数据连线（跳过流程控制节点的作用域标记边）。</summary>
+    public Connection? FindDataConnection(string toNode, string toPort) =>
+        Connections.FirstOrDefault(c => c.ToNode == toNode && c.ToPort == toPort && !IsFlowSource(c.FromNode));
 
     /// <summary>断开某输出端口上的所有连线（从已连线输出端口拉线 = 拆线重连）。</summary>
     public void DisconnectOutput(string fromNode, string fromPort)
@@ -152,6 +171,7 @@ public sealed class Connection
     {
         public string Name { get; set; } = "";
         public bool Locked { get; set; }
+        public bool IsOperator { get; set; }
         public List<PipelineNode> Nodes { get; set; } = new();
         public List<PipelineConn> Connections { get; set; } = new();
     }
@@ -182,6 +202,7 @@ public sealed class Connection
         {
             Name = name,
             Locked = Locked,
+            IsOperator = IsOperator,
             Nodes = Nodes.Select(n => new PipelineNode
             {
                 Id = n.Id, Def = n.DefId, Title = n.Title, X = n.X, Y = n.Y, Width = n.Width,
@@ -217,13 +238,19 @@ public sealed class Connection
         Nodes.Clear();
         Connections.Clear();
         Locked = doc.Locked;
+        IsOperator = doc.IsOperator;
 
-        // 节点实例化后 Id 是新生成的，连线按「保存 Id → 新实例」重映射，否则全部失配被丢弃
+        // 节点 Id 保留保存文件里的原值（子流程参数键锚定节点 Id，跨加载/改名稳定）；
+        // 文件里 Id 为空或重复（手改损坏）→ 发新 Id 兜底，防 byId 字典构建炸键冲突
         var idMap = new Dictionary<string, NodeInstance>();
+        var usedIds = new HashSet<string>();
         foreach (var n in doc.Nodes)
         {
             if (!NodeDefs.Map.ContainsKey(n.Def)) continue;
-            var inst = new NodeInstance { DefId = n.Def, X = n.X, Y = n.Y, Title = n.Title, Width = n.Width };
+            var id = !string.IsNullOrWhiteSpace(n.Id) && usedIds.Add(n.Id)
+                ? n.Id
+                : Guid.NewGuid().ToString("N")[..8];
+            var inst = new NodeInstance { Id = id, DefId = n.Def, X = n.X, Y = n.Y, Title = n.Title, Width = n.Width };
             if (n.Params is not null)
                 foreach (var kv in n.Params)
                     inst.Params[kv.Key] = JsonToObject(kv.Value);

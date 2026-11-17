@@ -219,20 +219,96 @@ public static class NodeDefs
                 return new Dictionary<string, object?>();
             },
         },
+
+        // ==================== 流程控制（for/while/switch——执行器按控制语义驱动） ====================
+        new()
+        {
+            Id = "flow.for", Name = "For 循环", Category = "源", Group = "流程控制",
+            Description = "整图按 [起始, 终止) 步长循环执行，每次迭代发布/预览逐次触发。作用域=从「计数」沿连线可达的全部下游（连线是作用域标记不传数据）；作用域外节点只执行一次。作用域内字符串参数可写 {计数} 或 {循环名.计数}，迭代期替换为当前计数值（路径场景：Z:\\data\\case_{计数}）",
+            Outputs = new[] { new PortDef { Name = "计数", Type = PortType.Control } },
+            Params = new[]
+            {
+                new AlgoParam { Name = "起始", Label = "起始", Type = AlgoParamType.Int, Default = 0 },
+                new AlgoParam { Name = "终止", Label = "终止", Type = AlgoParamType.Int, Default = 10 },
+                new AlgoParam { Name = "步长", Label = "步长", Type = AlgoParamType.Int, Default = 1, Min = -10000, Max = 10000 },
+            },
+            Execute = ctx => new Dictionary<string, object?>(),   // 输出由执行器预置（循环驱动）
+        },
+        new()
+        {
+            Id = "flow.while", Name = "While 循环", Category = "源", Group = "流程控制",
+            Description = "整图循环执行至「计数」等于终止值（步长控制方向），每次迭代发布/预览逐次触发。作用域=从「计数」沿连线可达的全部下游（连线是作用域标记不传数据）；作用域外节点只执行一次。作用域内字符串参数可写 {计数} 或 {循环名.计数}，迭代期替换为当前计数值（路径场景：Z:\\data\\case_{计数}）",
+            Outputs = new[] { new PortDef { Name = "计数", Type = PortType.Control } },
+            Params = new[]
+            {
+                new AlgoParam { Name = "起始", Label = "起始", Type = AlgoParamType.Int, Default = 10 },
+                new AlgoParam { Name = "终止", Label = "终止", Type = AlgoParamType.Int, Default = 0 },
+                new AlgoParam { Name = "步长", Label = "步长", Type = AlgoParamType.Int, Default = -1, Min = -10000, Max = 10000 },
+            },
+            Execute = ctx => new Dictionary<string, object?>(),
+        },
+        new()
+        {
+            Id = "flow.switch_cloud", Name = "条件分支(点云)", Category = "处理", Group = "流程控制",
+            Description = "按「分支索引」把输入路由到对应出口（0-3）；未选中出口的下游整段跳过",
+            Inputs = new[] { new PortDef { Name = "输入", Type = PortType.Cloud } },
+            Outputs = new[] { "出口0", "出口1", "出口2", "出口3" }.Select(n => new PortDef { Name = n, Type = PortType.Cloud }).ToArray(),
+            Params = new[]
+            {
+                new AlgoParam { Name = "分支", Label = "分支索引", Type = AlgoParamType.Int, Default = 0, Min = 0, Max = 3 },
+            },
+            Execute = ctx =>
+            {
+                var cloud = ctx.Input<CloudPayload>("输入");
+                var idx = Math.Clamp(ctx.Param("分支", 0), 0, 3);
+                ctx.Log($"路由到 出口{idx}");
+                return new Dictionary<string, object?> { [$"出口{idx}"] = cloud };
+            },
+        },
+        new()
+        {
+            Id = "flow.switch_image", Name = "条件分支(图像)", Category = "处理", Group = "流程控制",
+            Description = "按「分支索引」把输入路由到对应出口（0-3）；未选中出口的下游整段跳过",
+            Inputs = new[] { new PortDef { Name = "输入", Type = PortType.Image } },
+            Outputs = new[] { "出口0", "出口1", "出口2", "出口3" }.Select(n => new PortDef { Name = n, Type = PortType.Image }).ToArray(),
+            Params = new[]
+            {
+                new AlgoParam { Name = "分支", Label = "分支索引", Type = AlgoParamType.Int, Default = 0, Min = 0, Max = 3 },
+            },
+            Execute = ctx =>
+            {
+                var img = ctx.Input<ImagePayload>("输入");
+                var idx = Math.Clamp(ctx.Param("分支", 0), 0, 3);
+                ctx.Log($"路由到 出口{idx}");
+                return new Dictionary<string, object?> { [$"出口{idx}"] = img };
+            },
+        },
     };
 
     public static IReadOnlyList<NodeDef> All => _all;
 
-    public static Dictionary<string, NodeDef> Map { get; } =
-        _all.ToDictionary(d => d.Id, StringComparer.OrdinalIgnoreCase);
+    private static readonly object _lock = new();
+    private static Dictionary<string, NodeDef>? _mapCache;
+
+    /// <summary>Id → 算子表（缓存构建；Register 时失效重建）。加锁——xUnit 并行测试类/宿主多线程并发注册曾竞争出丢条目。</summary>
+    public static IReadOnlyDictionary<string, NodeDef> Map
+    {
+        get
+        {
+            lock (_lock) { return _mapCache ??= _all.ToDictionary(d => d.Id, StringComparer.OrdinalIgnoreCase); }
+        }
+    }
 
     /// <summary>注册一个算子（内置 + JSON 声明 + 手写），Id 重复时忽略并返回 false。</summary>
     public static bool Register(NodeDef def)
     {
-        if (Map.ContainsKey(def.Id)) return false;
-        _all.Add(def);
-        Map[def.Id] = def;
-        return true;
+        lock (_lock)
+        {
+            if (_all.Any(d => d.Id.Equals(def.Id, StringComparison.OrdinalIgnoreCase))) return false;
+            _all.Add(def);
+            _mapCache = null;   // 失效重建
+            return true;
+        }
     }
 
     // ==================== 执行辅助 ====================

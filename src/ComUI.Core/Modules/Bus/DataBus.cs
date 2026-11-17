@@ -45,7 +45,18 @@ public sealed class DataBus : IBus
         // 旧帧释放在锁外（Dispose 可能较重；此时新帧已生效，晚订阅不会拿到旧帧）
         stale?.Dispose();
         foreach (var s in subs)
-            Deliver(s, payload);
+        {
+            try
+            {
+                Deliver(s, payload);
+            }
+            catch (Exception ex)
+            {
+                // 单个订阅者异常不中断其余投递、也不传回发布方线程（否则无关插件的回调
+                // bug 会把整条算法执行判死）。挂钩子可见，宿主接日志。
+                DeliveryError?.Invoke($"[DataBus] {topic} 订阅者处理异常: {ex.Message}");
+            }
+        }
         FramePublished?.Invoke(topic, payload);   // 总线级追踪钩子（锁外；订阅方自行封送线程）
     }
 
@@ -69,20 +80,33 @@ public sealed class DataBus : IBus
         }
 
         if (hasRetained)
-            Deliver(sub, retained);
+        {
+            try
+            {
+                Deliver(sub, retained);
+            }
+            catch (Exception ex)
+            {
+                DeliveryError?.Invoke($"[DataBus] {topic} 订阅者处理异常: {ex.Message}");
+            }
+        }
 
         return new Unsub(() =>
         {
             lock (_gate)
             {
+                // 按实例移除（同委托对同一主题订阅两次时，Dispose 一次只移除自己）
                 if (_topics.TryGetValue(topic, out var t))
-                    t.Subs.RemoveAll(s => s.Handler == handler);
+                    t.Subs.RemoveAll(s => ReferenceEquals(s, sub));
             }
         });
     }
 
     /// <summary>总线级发布钩子（锁外触发，可能在任意线程）。</summary>
     public event Action<string, object?>? FramePublished;
+
+    /// <summary>订阅者投递异常钩子（宿主启动时接 LogService.Error；订阅方自行封送线程）。</summary>
+    public static Action<string>? DeliveryError { get; set; }
 
     public bool TryGetLatestRaw(string topic, out object? payload)
     {

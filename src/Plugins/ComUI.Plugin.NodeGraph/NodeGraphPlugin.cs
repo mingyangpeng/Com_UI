@@ -72,6 +72,16 @@ public sealed class NodeGraphPlugin : IPlugin
         {
             context.LogError($"算子 JSON 注册失败: {ex.Message}");
         }
+
+        // 注册「子流程」算子：已转为算子的流水线（params.json isOperator=true）动态注册为黑盒节点
+        try
+        {
+            RegisterSubPipelineOperators(m => context.Log(m));
+        }
+        catch (Exception ex)
+        {
+            context.LogError($"子流程算子注册失败: {ex.Message}");
+        }
     }
 
     private static string FileNameToName(string path)
@@ -110,7 +120,10 @@ public sealed class NodeGraphPlugin : IPlugin
         _library = view;
         view.OperatorClicked += AddToActivePage;
         view.OperatorPlaced += (defId, screen) =>
-            (_activeEditor ?? _pages.LastOrDefault())?.PlaceNodeAtScreen(defId, screen);
+        {
+            var node = (_activeEditor ?? _pages.LastOrDefault())?.PlaceNodeAtScreen(defId, screen);
+            if (node is not null) ApplyParamOverrides(node, defId);   // 拖拽放置同样应用面板参数覆盖
+        };
         _views.Add(view);
         return view;
     }
@@ -172,9 +185,196 @@ public sealed class NodeGraphPlugin : IPlugin
         return view;
     }
 
-    /// <summary>算子库单击：添加到最近打开的流水线页面中心。</summary>
-    private void AddToActivePage(string defId) =>
-        (_activeEditor ?? _pages.LastOrDefault())?.AddNodeCentered(defId);
+    /// <summary>算子库单击：添加到最近打开的流水线页面中心（应用算子面板里编辑的参数覆盖）。</summary>
+    private void AddToActivePage(string defId)
+    {
+        var page = (_activeEditor ?? _pages.LastOrDefault());
+        if (page is null) return;
+        var node = page.AddNodeCentered(defId);
+        if (node is not null) ApplyParamOverrides(node, defId);
+    }
+
+    /// <summary>把算子面板编辑的参数覆盖应用到新节点（数值/布尔按类型解析，其余存文本）。</summary>
+    private void ApplyParamOverrides(NodeInstance node, string defId)
+    {
+        if (_library is null) return;
+        if (!_library.ParamOverrides.TryGetValue(defId, out var ov)) return;
+        var def = NodeDefs.Map[node.DefId];
+        foreach (var p in def.Params)
+        {
+            if (!ov.TryGetValue(p.Name, out var raw) || raw is null) continue;
+            node.Params[p.Name] = p.Type switch
+            {
+                ComUI.Sdk.AlgoParamType.Number => double.TryParse(raw, out var dv) ? dv : p.Default,
+                ComUI.Sdk.AlgoParamType.Int => int.TryParse(raw, out var iv) ? iv : p.Default,
+                ComUI.Sdk.AlgoParamType.Boolean => raw == "true" || raw == "True",
+                _ => raw,
+            };
+        }
+    }
+
+    /// <summary>
+    /// 子流程算子注册：「⬆ 转为算子」标记的流水线（params.json isOperator=true）→ 动态注册为
+    /// 算子库「子流程」栏目的黑盒节点。端口自动推导：图内入度 0 且有输入端口的节点 = 输入端口
+    /// （父图喂数据），出度 0 且有输出端口的节点 = 输出端口。参数扁平化为 "节点名.参数名"
+    /// （与 params.json 同键），执行时映射回子图节点并整图运行（复用 GraphExecutor）。
+    /// </summary>
+    private void RegisterSubPipelineOperators(Action<string> log)
+    {
+        foreach (var (_, pipelinePath) in _algorithms)
+        {
+            try
+            {
+                var paramsPath = Path.Combine(Path.GetDirectoryName(pipelinePath)!,
+                    Path.GetFileNameWithoutExtension(pipelinePath) + ".params.json");
+                if (!File.Exists(paramsPath)) continue;
+
+                using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(paramsPath));
+                if (!doc.RootElement.TryGetProperty("isOperator", out var isOp) || !isOp.GetBoolean()) continue;
+
+                var graph = new GraphDocument();
+                graph.LoadFromJson(File.ReadAllText(pipelinePath));
+                var defId = "sub." + Path.GetFileNameWithoutExtension(pipelinePath).Replace(' ', '_');
+
+                // 输入端口：入度 0 且有输入端口的节点（需要外部数据）
+                var inDeg = graph.Nodes.ToDictionary(n => n.Id, _ => 0);
+                foreach (var c in graph.Connections)
+                    if (graph.Nodes.Any(n => n.Id == c.ToNode)) inDeg[c.ToNode]++;
+
+                var inputs = new List<PortDef>();
+                var outputs = new List<PortDef>();
+                foreach (var n in graph.Nodes)
+                {
+                    var def = NodeDefs.Map[n.DefId];
+                    var label = n.Title ?? def.Name;
+                    if (inDeg[n.Id] == 0)
+                        foreach (var p in def.Inputs)
+                            inputs.Add(new PortDef { Name = $"{label}.{p.Name}", Type = p.Type });
+                    if (!graph.Connections.Any(c => c.FromNode == n.Id))
+                        foreach (var p in def.Outputs)
+                            outputs.Add(new PortDef { Name = $"{label}.{p.Name}", Type = p.Type });
+                }
+
+                // 参数扁平化（节点名.参数名）——与 params.json 同键，面板/保存同步共用
+                var flatParams = new List<ComUI.Sdk.AlgoParam>();
+                foreach (var n in graph.Nodes)
+                {
+                    var def = NodeDefs.Map[n.DefId];
+                    var label = n.Title ?? def.Name;
+                    foreach (var p in def.Params)
+                        flatParams.Add(new ComUI.Sdk.AlgoParam
+                        {
+                            Name = $"{label}.{p.Name}", Label = $"{label}·{p.Label ?? p.Name}",
+                            Type = p.Type, Default = n.Params.TryGetValue(p.Name, out var v) ? v : p.Default,
+                            Min = p.Min, Max = p.Max, Options = p.Options,
+                        });
+                }
+
+                var pipelinePathCopy = pipelinePath;
+                var desc = $"子流程：{graph.Nodes.Count} 节点 / {graph.Connections.Count} 连线（双击编辑可改）";
+                var subDef = new NodeDef
+                {
+                    Id = defId,
+                    Name = Path.GetFileNameWithoutExtension(pipelinePath),
+                    Category = "处理",
+                    Group = "子流程",
+                    Description = desc,
+                    Inputs = inputs.ToArray(),
+                    Outputs = outputs.ToArray(),
+                    Params = flatParams.ToArray(),
+                    Execute = ctx => RunSubPipeline(pipelinePathCopy, ctx),
+                };
+                if (NodeDefs.Register(subDef))
+                    log($"子流程算子已注册: {subDef.Name} <{defId}>（{inputs.Count} 入 / {outputs.Count} 出）");
+            }
+            catch (Exception ex)
+            {
+                // 单个流水线损坏不阻断其它子流程注册
+                log($"子流程算子注册失败 {Path.GetFileName(pipelinePath)}: {ex.Message}");
+            }
+        }
+    }
+
+    /// <summary>子流程嵌套深度（子流程套子流程允许；自引用/循环引用在此拦截——
+    /// 无护栏会无限递归栈溢出直接杀进程，不可恢复）。</summary>
+    private static int _subPipelineDepth;
+
+    /// <summary>子流程算子执行：加载子图 → 应用扁平化参数 → 预置输入端口 → 整图运行 → 收集输出端口值。</summary>
+    private static Dictionary<string, object?> RunSubPipeline(string pipelinePath, NodeRunContext ctx)
+    {
+        if (++_subPipelineDepth > 8)
+        {
+            _subPipelineDepth--;
+            throw new Exception("子流程嵌套过深（疑似自引用循环）——子流程算子不能再引用包含它自己的流水线");
+        }
+        try
+        {
+            return RunSubPipelineInner(pipelinePath, ctx);
+        }
+        finally
+        {
+            _subPipelineDepth--;
+        }
+    }
+
+    private static Dictionary<string, object?> RunSubPipelineInner(string pipelinePath, NodeRunContext ctx)
+    {
+        var sub = new GraphDocument();
+        sub.LoadFromJson(File.ReadAllText(pipelinePath));
+
+        // 扁平化参数（节点名.参数名）映射回子图节点
+        foreach (var n in sub.Nodes)
+        {
+            var def = NodeDefs.Map[n.DefId];
+            var label = n.Title ?? def.Name;
+            foreach (var p in def.Params)
+            {
+                var key = $"{label}.{p.Name}";
+                if (ctx.Params.TryGetValue(key, out var v))
+                    n.Params[p.Name] = v;
+            }
+        }
+
+        // 输入端口绑定：端口名 = 节点名.端口名 → 预置到对应子图节点的输出
+        var presets = new Dictionary<(string, string), object?>();
+        var inDeg = sub.Nodes.ToDictionary(n => n.Id, _ => 0);
+        foreach (var c in sub.Connections)
+            if (sub.Nodes.Any(n => n.Id == c.ToNode)) inDeg[c.ToNode]++;
+
+        foreach (var n in sub.Nodes)
+        {
+            if (inDeg[n.Id] != 0) continue;
+            var def = NodeDefs.Map[n.DefId];
+            var label = n.Title ?? def.Name;
+            foreach (var p in def.Inputs)
+            {
+                var key = $"{label}.{p.Name}";
+                if (ctx.Inputs.TryGetValue(key, out var v) && v is not null)
+                    presets[(n.Id, p.Name)] = v;
+            }
+        }
+
+        // 同步整图运行（Execute 已在后台线程，无 UI 同步上下文）+ 收集子图全部输出
+        var collected = new Dictionary<(string, string), object?>();
+        GraphExecutor.RunAsync(sub, (_, _, _) => { }, m => { }, CancellationToken.None, presets, collected)
+                     .GetAwaiter().GetResult();
+
+        // 收集输出端口：出度 0 节点的输出
+        var result = new Dictionary<string, object?>();
+        foreach (var n in sub.Nodes)
+        {
+            if (sub.Connections.Any(c => c.FromNode == n.Id)) continue;
+            var def = NodeDefs.Map[n.DefId];
+            var label = n.Title ?? def.Name;
+            foreach (var p in def.Outputs)
+            {
+                var key = $"{label}.{p.Name}";
+                if (collected.TryGetValue((n.Id, p.Name), out var v))
+                    result[key] = v;
+            }
+        }
+        return result;
+    }
 
     public void Shutdown()
     {
@@ -185,5 +385,8 @@ public sealed class NodeGraphPlugin : IPlugin
         foreach (var v in _views) v.Dispose();
         _views.Clear();
         _pages.Clear();
+        _library = null;
+        _activeEditor = null;
+        _algorithms.Clear();
     }
 }
