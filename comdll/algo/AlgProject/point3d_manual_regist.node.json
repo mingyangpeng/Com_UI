@@ -10,41 +10,54 @@
   "assembly": "Point3DAlg.dll",
   "method": "Point3DAlg_ComuiManualRegist",
   "inputs": [
-    { "name": "源点云", "type": "cloud" },
-    { "name": "目标点云", "type": "cloud" }
+    {
+      "name": "源点云",
+      "type": "cloud"
+    },
+    {
+      "name": "目标点云",
+      "type": "cloud"
+    }
   ],
   "params": [
     {
       "name": "strategy",
-      "label": "配准策略(1-6)",
+      "label": "配准策略(1-7)",
       "type": "int",
       "default": 1,
       "min": 1,
-      "max": 6
+      "max": 7,
+      "description": "配准策略（1~7）"
     },
     {
       "name": "init_transform",
       "label": "初始变换(16值逗号分隔)",
       "type": "text",
-      "default": "1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1"
+      "default": "1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1",
+      "description": "初始变换 4×4 共 16 值逗号分隔（默认单位阵；建议用 Point3DAlg_RegistTool.exe 键盘粗调后导出的 regist_T_flat.txt 内容）"
     },
     {
       "name": "max_distance",
       "label": "对应点距离(mm,0=自适应)",
       "type": "number",
       "default": 0.0,
-      "min": 0.0
+      "min": 0.0,
+      "description": "ICP 最大对应点距离（mm）"
     },
     {
       "name": "max_iteration",
       "label": "最大迭代",
       "type": "int",
       "default": 60,
-      "min": 1
+      "min": 1,
+      "description": "最大迭代次数"
     }
   ],
   "outputs": [
-    { "name": "配准点云", "type": "cloud" }
+    {
+      "name": "配准点云",
+      "type": "cloud"
+    }
   ],
   "source": {
     "files": [

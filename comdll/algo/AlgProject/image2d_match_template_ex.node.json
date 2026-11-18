@@ -26,7 +26,8 @@
       "type": "int",
       "default": 5,
       "min": 0,
-      "max": 5
+      "max": 5,
+      "description": "cv::TemplateMatchModes（默认 5=CCOEFF_NORMED 归一化相关）"
     },
     {
       "name": "scale_lo",
@@ -34,7 +35,8 @@
       "type": "number",
       "default": 0.8,
       "min": 0.01,
-      "max": 10
+      "max": 10,
+      "description": "尺度搜索下限"
     },
     {
       "name": "scale_hi",
@@ -42,7 +44,8 @@
       "type": "number",
       "default": 1.2,
       "min": 0.01,
-      "max": 10
+      "max": 10,
+      "description": "尺度搜索上限"
     },
     {
       "name": "scale_step",
@@ -50,7 +53,8 @@
       "type": "number",
       "default": 0.05,
       "min": 0.001,
-      "max": 10
+      "max": 10,
+      "description": "尺度步距"
     },
     {
       "name": "angle_lo",
@@ -58,7 +62,8 @@
       "type": "number",
       "default": -15,
       "min": -360,
-      "max": 360
+      "max": 360,
+      "description": "角度搜索下限（度，逆时针）"
     },
     {
       "name": "angle_hi",
@@ -66,7 +71,8 @@
       "type": "number",
       "default": 15,
       "min": -360,
-      "max": 360
+      "max": 360,
+      "description": "角度搜索上限（度）"
     },
     {
       "name": "angle_step",
@@ -74,7 +80,8 @@
       "type": "number",
       "default": 1,
       "min": 0.01,
-      "max": 90
+      "max": 90,
+      "description": "角度步距（度）"
     }
   ],
   "outputs": [

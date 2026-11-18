@@ -21,7 +21,8 @@
       "label": "bump判定高度(mm,相对基面)",
       "type": "number",
       "default": 0.02,
-      "min": 0.0
+      "min": 0.0,
+      "description": "bump 与基面的分离高度阈值（mm）"
     },
     {
       "name": "cluster_tolerance",
@@ -29,21 +30,24 @@
       "type": "number",
       "default": 0.12,
       "min": 0.001,
-      "max": 5.0
+      "max": 5.0,
+      "description": "欧式聚类邻域半径（mm）"
     },
     {
       "name": "min_points",
       "label": "每bump最少点数",
       "type": "int",
       "default": 8,
-      "min": 4
+      "min": 4,
+      "description": "每簇最少点数（<4 强制 4）"
     },
     {
       "name": "max_fit_rms",
       "label": "球拟合残差上限(mm)",
       "type": "number",
       "default": 0.005,
-      "min": 0.0
+      "min": 0.0,
+      "description": "球面拟合 RMS 上限（超限簇判无效）"
     }
   ],
   "outputs": [

@@ -12,6 +12,8 @@
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
+#include <opencv2/features2d.hpp>
+#include <opencv2/calib3d.hpp>
 
 #include <math.h>
 #include <stdlib.h>
@@ -206,6 +208,74 @@ int Image2DAlg_Threshold(const Image2DAlg_Image* in, int mode, double thresh, do
         default: ImageProcessor::adaptiveThreshold(gray, dst, maxval,
                                                    cv::ADAPTIVE_THRESH_GAUSSIAN_C,
                                                    OddAtLeast(block_size, 3), C); break;
+        }
+        return CopyOut(dst, out);
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_Binarize(const Image2DAlg_Image* in, int mode,
+                        double thresh, double thresh2, double maxval, double mid_val,
+                        int block_size, double C, int invert, Image2DAlg_Image* out) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!out) return -1;
+    if (mode < 0 || mode > 10) return -3;
+
+    // 钳制到 8 位灰度范围
+    auto clamp8 = [](double v) -> int {
+        if (v < 0.0) return 0;
+        if (v > 255.0) return 255;
+        return (int)(v + 0.5);
+    };
+    const int hi_maxval = clamp8(maxval);
+
+    // 双阈值合法性：high >= low，否则 -3
+    if (mode >= 8 && thresh2 < thresh) return -3;
+
+    try {
+        cv::Mat gray = GrayOf(src), dst;
+
+        if (mode == 3 || mode == 4) {
+            // 自适应：光照不均场景
+            ImageProcessor::adaptiveThreshold(gray, dst, hi_maxval,
+                mode == 3 ? cv::ADAPTIVE_THRESH_MEAN_C : cv::ADAPTIVE_THRESH_GAUSSIAN_C,
+                OddAtLeast(block_size, 3), C);
+        } else if (mode >= 8) {
+            // 双阈值：256 项 LUT 分段映射，O(1)/像素
+            const int low = clamp8(thresh), high = clamp8(thresh2);
+            const int mid = clamp8(mid_val);
+            cv::Mat lut(1, 256, CV_8UC1);
+            uchar* t = lut.ptr<uchar>(0);
+            for (int v = 0; v < 256; ++v) {
+                int o;
+                if (mode == 8)       o = (v >= low && v <= high) ? hi_maxval : 0;
+                else if (mode == 9)  o = (v < low || v > high) ? hi_maxval : 0;
+                else /* mode == 10 */ o = (v < low) ? 0 : ((v <= high) ? mid : hi_maxval);
+                t[v] = (uchar)o;
+            }
+            ImageProcessor::lut(gray, lut, dst);
+        } else {
+            // 单阈值族：cv::threshold 透传（OTSU 时 thresh 忽略）
+            int cv_type = cv::THRESH_BINARY;
+            double t = thresh;
+            switch (mode) {
+            case 0: cv_type = cv::THRESH_BINARY;     break;
+            case 1: cv_type = cv::THRESH_BINARY_INV; break;
+            case 2: cv_type = cv::THRESH_BINARY | cv::THRESH_OTSU; t = 0; break;
+            case 5: cv_type = cv::THRESH_TRUNC;      break;
+            case 6: cv_type = cv::THRESH_TOZERO;     break;
+            default: cv_type = cv::THRESH_TOZERO_INV; break;  // mode 7
+            }
+            ImageProcessor::threshold(gray, dst, t, hi_maxval, cv_type);
+        }
+
+        // 统一反转：v -> 255 - v（对所有 mode 生效；二值图等价于前景/背景互换）
+        if (invert) {
+            cv::Mat flipped;
+            ImageProcessor::bitwiseNot(dst, flipped);
+            dst = flipped;
         }
         return CopyOut(dst, out);
     } catch (const cv::Exception&) {
@@ -1767,5 +1837,333 @@ int Image2DAlg_FitPoly(const float* xy, int count, int degree, Image2DAlg_PolyFi
     }
 }
 
+
+
+// ---------------- 特征点查找（cv 直接调用：ImageProcessor 未封装 cornerHarris/ORB） ----------------
+
+// 亚像素细化公共步骤：cornerSubPix + 失败防护（细化失败保持原位置）
+void RefineSubPix(const cv::Mat& gray, std::vector<cv::Point2f>& pts) {
+    cv::cornerSubPix(gray, pts, cv::Size(5, 5), cv::Size(-1, -1),
+                     cv::TermCriteria(cv::TermCriteria::EPS | cv::TermCriteria::MAX_ITER, 30, 0.03));
+    for (size_t i = 0; i < pts.size(); ++i)
+        if (std::isnan(pts[i].x) || std::isnan(pts[i].y) || pts[i].x < 0 || pts[i].y < 0 ||
+            pts[i].x >= gray.cols || pts[i].y >= gray.rows)
+            pts[i] = cv::Point2f(std::lround(pts[i].x) < 0 ? 0 : pts[i].x,
+                                 std::lround(pts[i].y) < 0 ? 0 : pts[i].y);
+}
+
+int Image2DAlg_HarrisCorners(const Image2DAlg_Image* in, int block_size, int ksize, double k,
+                             double thresh_ratio, int subpix,
+                             Image2DAlg_Point2f** out_points, int* out_count) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!out_points || !out_count) return -1;
+    if (block_size < 3 || ksize < 3) return -3;
+    if (thresh_ratio < 0.0 || thresh_ratio > 1.0) return -3;
+    *out_points = nullptr;
+    *out_count = 0;
+    try {
+        cv::Mat gray = GrayOf(src);
+        cv::Mat resp;
+        cv::cornerHarris(gray, resp, block_size, ksize, k);
+        double lo = 0, hi = 0;
+        cv::Point loLoc, hiLoc;
+        cv::minMaxLoc(resp, &lo, &hi, &loLoc, &hiLoc);
+        const double thr = thresh_ratio * hi;
+        cv::Mat dil;
+        cv::dilate(resp, dil, cv::Mat());   // 3x3 局部极大值 NMS
+        std::vector<cv::Point2f> pts;
+        for (int y = 0; y < resp.rows; ++y)
+            for (int x = 0; x < resp.cols; ++x)
+                if (resp.at<float>(y, x) >= thr && resp.at<float>(y, x) >= dil.at<float>(y, x))
+                    pts.push_back(cv::Point2f((float)x, (float)y));
+        if (pts.empty()) return 0;
+        std::sort(pts.begin(), pts.end(), [&resp](const cv::Point2f& a, const cv::Point2f& b) {
+            return resp.at<float>((int)a.y, (int)a.x) > resp.at<float>((int)b.y, (int)b.x);
+        });
+        if (subpix) RefineSubPix(gray, pts);
+        size_t bytes = sizeof(Image2DAlg_Point2f) * pts.size();
+        Image2DAlg_Point2f* arr = (Image2DAlg_Point2f*)malloc(bytes);
+        if (!arr) return -4;
+        memcpy(arr, pts.data(), bytes);
+        *out_points = arr;
+        *out_count = (int)pts.size();
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_GoodFeatures(const Image2DAlg_Image* in, int max_corners,
+                            double quality_level, double min_distance, int subpix,
+                            Image2DAlg_Point2f** out_points, int* out_count) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!out_points || !out_count) return -1;
+    if (max_corners < 1) return -3;
+    if (quality_level <= 0.0 || quality_level > 1.0) return -3;
+    if (min_distance < 1) return -3;
+    *out_points = nullptr;
+    *out_count = 0;
+    try {
+        cv::Mat gray = GrayOf(src);
+        std::vector<cv::Point2f> corners;
+        cv::goodFeaturesToTrack(gray, corners, max_corners, quality_level, min_distance);
+        if (corners.empty()) return 0;
+        if (subpix) RefineSubPix(gray, corners);
+        size_t bytes = sizeof(Image2DAlg_Point2f) * corners.size();
+        Image2DAlg_Point2f* arr = (Image2DAlg_Point2f*)malloc(bytes);
+        if (!arr) return -4;
+        memcpy(arr, corners.data(), bytes);
+        *out_points = arr;
+        *out_count = (int)corners.size();
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_CornerSubPix(const Image2DAlg_Image* in,
+                            const Image2DAlg_Point2f* pts, int count,
+                            int win_size, Image2DAlg_Point2f** out_points) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!pts || !out_points) return -1;
+    if (count < 1) return -3;
+    if (win_size < 3) return -3;
+    *out_points = nullptr;
+    try {
+        cv::Mat gray = GrayOf(src);
+        std::vector<cv::Point2f> corners;
+        corners.reserve(count);
+        for (int i = 0; i < count; ++i)
+            corners.push_back(cv::Point2f(pts[i].x, pts[i].y));
+        RefineSubPix(gray, corners);
+        size_t bytes = sizeof(Image2DAlg_Point2f) * corners.size();
+        Image2DAlg_Point2f* arr = (Image2DAlg_Point2f*)malloc(bytes);
+        if (!arr) return -4;
+        memcpy(arr, corners.data(), bytes);
+        *out_points = arr;
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+// ---------------- 多边形拟合 / 多目标旋转矩形 ----------------
+
+int Image2DAlg_ApproxPolyDP(const float* xy, int count, double epsilon,
+                            int closed, float** out_xy, int* out_count) {
+    if (!xy || !out_xy || !out_count) return -1;
+    if (count < 3) return -3;
+    if (epsilon < 0) return -3;
+    *out_xy = nullptr;
+    *out_count = 0;
+    try {
+        std::vector<cv::Point> c;
+        c.reserve(count);
+        for (int i = 0; i < count; ++i)   // approxPolyDP 接口为整数点（像素坐标）
+            c.push_back(cv::Point((int)std::lround(xy[i * 2]), (int)std::lround(xy[i * 2 + 1])));
+        std::vector<cv::Point> approx;
+        ImageProcessor::approxPolyDP(c, approx, epsilon, closed != 0);
+        if ((int)approx.size() < 3) return -3;   // 逼近过度退化（epsilon 过大）
+        size_t bytes = sizeof(float) * approx.size() * 2;
+        float* arr = (float*)malloc(bytes);
+        if (!arr) return -4;
+        for (size_t i = 0; i < approx.size(); ++i) {
+            arr[i * 2] = (float)approx[i].x;
+            arr[i * 2 + 1] = (float)approx[i].y;
+        }
+        *out_xy = arr;
+        *out_count = (int)approx.size();
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_FitRectsFromBinary(const Image2DAlg_Image* in,
+                                  int min_area, int max_area,
+                                  Image2DAlg_RectFit** out_rects, int* out_count) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!out_rects || !out_count) return -1;
+    *out_rects = nullptr;
+    *out_count = 0;
+    try {
+        cv::Mat bin = Binarize(src);
+        std::vector<std::vector<cv::Point>> contours;
+        ImageProcessor::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+        std::vector<Image2DAlg_RectFit> result;
+        for (const auto& c : contours) {
+            const double area = ImageProcessor::contourArea(c);
+            if (area < min_area) continue;
+            if (max_area > 0 && area > max_area) continue;
+            if ((int)c.size() < 3) continue;
+            cv::RotatedRect r = ImageProcessor::getMinAreaRect(c);
+            if (r.size.width <= 0 || r.size.height <= 0) continue;
+            Image2DAlg_RectFit fit;
+            fit.cx = r.center.x;
+            fit.cy = r.center.y;
+            fit.width = r.size.width;
+            fit.height = r.size.height;
+            fit.angle = r.angle;
+            result.push_back(fit);
+        }
+        if (result.empty()) return 0;
+        size_t bytes = sizeof(Image2DAlg_RectFit) * result.size();
+        Image2DAlg_RectFit* arr = (Image2DAlg_RectFit*)malloc(bytes);
+        if (!arr) return -4;
+        memcpy(arr, result.data(), bytes);
+        *out_rects = arr;
+        *out_count = (int)result.size();
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+void Image2DAlg_FreeRectFits(Image2DAlg_RectFit* rects) {
+    free(rects);
+}
+
+// ---------------- ORB 特征对位（cv features2d/calib3d 直接调用） ----------------
+
+int Image2DAlg_ORBAlign(const Image2DAlg_Image* in1, const Image2DAlg_Image* in2,
+                        int n_features, double ratio, double m[6],
+                        Image2DAlg_OrbMatch** out_matches, int* out_count, int* out_inliers) {
+    cv::Mat a, b;
+    if (!m || !out_matches || !out_count || !out_inliers) return -1;
+    if (int rc = Wrap(in1, a)) return rc;
+    if (int rc = Wrap(in2, b)) return rc;
+    if (n_features <= 0) return -3;
+    if (ratio <= 0.0 || ratio >= 1.0) return -3;
+    *out_matches = nullptr;
+    *out_count = 0;
+    *out_inliers = 0;
+    try {
+        cv::Mat g1 = GrayOf(a), g2 = GrayOf(b);
+        // edgeThreshold 默认 31 会在小图上把可用区域挤到中心几点（64x64 → 2x2），
+        // 按图像尺寸自适应收紧到 8
+        cv::Ptr<cv::ORB> orb = cv::ORB::create(n_features, 1.2f, 8, 8);
+        std::vector<cv::KeyPoint> kp1, kp2;
+        cv::Mat d1, d2;
+        orb->detectAndCompute(g1, cv::noArray(), kp1, d1);
+        orb->detectAndCompute(g2, cv::noArray(), kp2, d2);
+        if ((int)kp1.size() < 4 || (int)kp2.size() < 4 || d1.empty() || d2.empty()) return -2;
+
+        cv::BFMatcher matcher(cv::NORM_HAMMING);
+        std::vector<std::vector<cv::DMatch>> knn;
+        matcher.knnMatch(d1, d2, knn, 2);
+        std::vector<cv::DMatch> good;
+        for (const auto& km : knn)
+            if (km.size() == 2 && km[0].distance < ratio * km[1].distance)
+                good.push_back(km[0]);
+        if ((int)good.size() < 3) return -2;
+
+        std::vector<cv::Point2f> p1, p2;
+        p1.reserve(good.size());
+        p2.reserve(good.size());
+        for (const auto& gm : good) {
+            p1.push_back(kp1[gm.queryIdx].pt);
+            p2.push_back(kp2[gm.trainIdx].pt);
+        }
+        cv::Mat inlierMask;
+        cv::Mat A = cv::estimateAffine2D(p1, p2, inlierMask, cv::RANSAC, 3.0);
+        if (A.empty() || A.rows < 2 || A.cols < 3) return -2;
+
+        for (int r = 0; r < 2; ++r)
+            for (int c = 0; c < 3; ++c)
+                m[r * 3 + c] = A.at<double>(r, c);
+        *out_inliers = cv::countNonZero(inlierMask);
+
+        Image2DAlg_OrbMatch* arr =
+            (Image2DAlg_OrbMatch*)malloc(sizeof(Image2DAlg_OrbMatch) * good.size());
+        if (!arr) return -4;
+        for (size_t i = 0; i < good.size(); ++i) {
+            arr[i].x1 = kp1[good[i].queryIdx].pt.x;
+            arr[i].y1 = kp1[good[i].queryIdx].pt.y;
+            arr[i].x2 = kp2[good[i].trainIdx].pt.x;
+            arr[i].y2 = kp2[good[i].trainIdx].pt.y;
+            arr[i].distance = good[i].distance;
+        }
+        *out_matches = arr;
+        *out_count = (int)good.size();
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+void Image2DAlg_FreeOrbMatches(Image2DAlg_OrbMatch* matches) {
+    free(matches);
+}
+
+void Image2DAlg_FreePoint2f(Image2DAlg_Point2f* pts) {
+    free(pts);
+}
+
+
+// ---------------- 多目标直线拟合（板边 / 边缘线测量） ----------------
+
+int Image2DAlg_FitLinesFromBinary(const Image2DAlg_Image* in,
+                                  int min_area, int max_area, double min_length,
+                                  Image2DAlg_LineFit** out_lines, int* out_count) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!out_lines || !out_count) return -1;
+    *out_lines = nullptr;
+    *out_count = 0;
+    try {
+        cv::Mat bin = Binarize(src);
+        std::vector<std::vector<cv::Point>> contours;
+        ImageProcessor::findContours(bin, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+        std::vector<Image2DAlg_LineFit> result;
+        for (const auto& c : contours) {
+            const double area = ImageProcessor::contourArea(c);
+            if (area < min_area) continue;
+            if (max_area > 0 && area > max_area) continue;
+            if ((int)c.size() < 2) continue;
+            std::vector<float> line;
+            ImageProcessor::fitLine(c, line, cv::DIST_L2);
+            Image2DAlg_LineFit fit;
+            fit.vx = line[0];
+            fit.vy = line[1];
+            fit.x0 = line[2];
+            fit.y0 = line[3];
+            // 覆盖跨度：轮廓点在方向上的投影极差（直线度过滤用）
+            double tmin = 0, tmax = 0;
+            for (const cv::Point& p : c) {
+                const double t = (p.x - fit.x0) * fit.vx + (p.y - fit.y0) * fit.vy;
+                tmin = std::min(tmin, t);
+                tmax = std::max(tmax, t);
+            }
+            const double span = tmax - tmin;
+            if (min_length > 0 && span < min_length) continue;
+            double sum = 0.0;
+            for (const cv::Point& p : c) {
+                const double dx = p.x - fit.x0, dy = p.y - fit.y0;
+                const double cross = dx * fit.vy - dy * fit.vx;
+                sum += cross * cross;
+            }
+            fit.rms = std::sqrt(sum / c.size());
+            result.push_back(fit);
+        }
+        if (result.empty()) return 0;
+        size_t bytes = sizeof(Image2DAlg_LineFit) * result.size();
+        Image2DAlg_LineFit* arr = (Image2DAlg_LineFit*)malloc(bytes);
+        if (!arr) return -4;
+        memcpy(arr, result.data(), bytes);
+        *out_lines = arr;
+        *out_count = (int)result.size();
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+void Image2DAlg_FreeLineFits(Image2DAlg_LineFit* lines) {
+    free(lines);
+}
 
 } // extern "C"

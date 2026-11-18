@@ -26,7 +26,8 @@
       "type": "int",
       "default": 5,
       "min": 0,
-      "max": 5
+      "max": 5,
+      "description": "cv::TemplateMatchModes（默认 5=归一化相关）"
     },
     {
       "name": "score_threshold",
@@ -34,7 +35,8 @@
       "type": "number",
       "default": 0.8,
       "min": 0,
-      "max": 1
+      "max": 1,
+      "description": "得分阈值（SQDIFF 系=得分≤阈值命中，其余=≥）"
     },
     {
       "name": "max_matches",
@@ -42,7 +44,8 @@
       "type": "int",
       "default": 10,
       "min": 1,
-      "max": 100
+      "max": 100,
+      "description": "最多输出数"
     },
     {
       "name": "nms_radius",
@@ -50,7 +53,8 @@
       "type": "int",
       "default": 5,
       "min": 0,
-      "max": 100
+      "max": 100,
+      "description": "非极大值抑制半径（像素）"
     }
   ],
   "outputs": [

@@ -61,6 +61,8 @@ public sealed class AlgoParam
     public string[]? Options { get; init; }
     public double? Min { get; init; }
     public double? Max { get; init; }
+    /// <summary>参数说明（node.json params[].description）——属性面板悬浮提示/副文本展示。</summary>
+    public string? Description { get; init; }
 }
 
 /// <summary>一次算法执行上下文：传参、进度、取消。</summary>

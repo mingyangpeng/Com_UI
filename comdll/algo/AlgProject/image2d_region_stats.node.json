@@ -22,7 +22,8 @@
       "type": "int",
       "default": 0,
       "min": 0,
-      "max": 100000
+      "max": 100000,
+      "description": "ROI 左上角 X"
     },
     {
       "name": "roi_y",
@@ -30,7 +31,8 @@
       "type": "int",
       "default": 0,
       "min": 0,
-      "max": 100000
+      "max": 100000,
+      "description": "ROI 左上角 Y"
     },
     {
       "name": "roi_w",
@@ -38,7 +40,8 @@
       "type": "int",
       "default": 0,
       "min": 0,
-      "max": 100000
+      "max": 100000,
+      "description": "ROI 宽（≤0 = 全图）"
     },
     {
       "name": "roi_h",
@@ -46,7 +49,8 @@
       "type": "int",
       "default": 0,
       "min": 0,
-      "max": 100000
+      "max": 100000,
+      "description": "ROI 高（≤0 = 全图）"
     }
   ],
   "outputs": [],

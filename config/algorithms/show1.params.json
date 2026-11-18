@@ -1,0 +1,10 @@
+{
+  "isOperator": true,
+  "group": "业务算子",
+  "params": {
+    "测试图像源.pattern": "圆环",
+    "For 循环.起始": 0,
+    "For 循环.终止": 10,
+    "For 循环.步长": 1
+  }
+}

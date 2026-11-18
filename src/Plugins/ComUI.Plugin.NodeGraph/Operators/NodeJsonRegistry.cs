@@ -148,6 +148,7 @@ public static class NodeJsonRegistry
                     Options = p.Options?.ToArray(),
                     Min = p.Min,
                     Max = p.Max,
+                    Description = string.IsNullOrWhiteSpace(p.Description) ? null : p.Description,
                 }).ToArray(),
                 Execute = native is not null
                     ? ctx => InvokeNative(json, native, ctx)
@@ -390,5 +391,6 @@ public static class NodeJsonRegistry
         [JsonPropertyName("options")] public List<string>? Options { get; set; }
         [JsonPropertyName("min")] public double? Min { get; set; }
         [JsonPropertyName("max")] public double? Max { get; set; }
+        [JsonPropertyName("description")] public string? Description { get; set; }
     }
 }

@@ -15,14 +15,16 @@
       "name": "folder",
       "label": "扫描数据文件夹",
       "type": "path",
-      "default": ""
+      "default": "",
+      "description": "扫描数据文件夹（*.dat + *.xml + Scan3DPart*.json）；mm 换算参数自动从数据文件读取"
     },
     {
       "name": "frame",
       "label": "指定帧(-1=全部)",
       "type": "int",
       "default": -1,
-      "min": -1
+      "min": -1,
+      "description": "指定帧号（<0 = 全部帧合并）"
     }
   ],
   "outputs": [
@@ -41,56 +43,13 @@
       "src/Point3DAlg/include/Point3DAlg_api.h",
       "src/Point3DAlg/include/Point3DAlg_SickReader.h",
       "src/CommonAlg/include/CommonAlg_Json.h",
-      "thrid/nlohmann_json/single_include/nlohmann/json.hpp",
-      "src/Point3DAlg/tools/Point3DAlg_Regist.h",
-      "src/Point3DAlg/tools/Point3DAlg_DomeFit.h",
-      "src/Point3DAlg/tools/Point3DAlg_RegionPlane.h",
-      "src/Point3DAlg/tools/Point3DAlg_CloudDiff.h",
-      "src/Point3DAlg/tools/Point3DAlg_CircleFit.h",
-      "src/Point3DAlg/tools/Point3DAlg_Profile.h",
-      "src/Point3DAlg/tools/Point3DAlg_BumpReport.h",
-      "src/ShapelyAlg/BoostCompat.h",
-      "src/ShapelyAlg/CloudIO.h",
-      "src/ShapelyAlg/CloudProcessor.h",
-      "src/ShapelyAlg/FitUtil.h",
-      "src/ShapelyAlg/Geom.h",
-      "src/ShapelyAlg/ImageProcessor.h",
-      "src/ShapelyAlg/ShapelyAlg.h",
-      "src/ShapelyAlg/Stereo.h",
-      "src/ShapelyAlg/Types.h",
-      "src/Point3DAlg/tools/Point3DAlg_BumpReport.cpp",
-      "src/Point3DAlg/tools/Point3DAlg_CircleFit.cpp",
-      "src/Point3DAlg/tools/Point3DAlg_CloudDiff.cpp",
-      "src/Point3DAlg/tools/Point3DAlg_DomeFit.cpp",
-      "src/Point3DAlg/tools/Point3DAlg_Profile.cpp",
-      "src/Point3DAlg/tools/Point3DAlg_RegionPlane.cpp",
-      "src/Point3DAlg/tools/Point3DAlg_Regist.cpp",
-      "src/Point3DAlg/tools/Point3DAlg_RegistTool.cpp",
-      "src/CommonAlg/CommonAlg_Json.cpp",
-      "src/ShapelyAlg/CloudIO.cpp",
-      "src/ShapelyAlg/CloudProcessor.cpp",
-      "src/ShapelyAlg/CloudProcessorMesh.cpp",
-      "src/ShapelyAlg/Geom.cpp",
-      "src/ShapelyAlg/ImageProcessor.cpp",
-      "src/ShapelyAlg/ShapelyAlg_bench.cpp",
-      "src/ShapelyAlg/ShapelyAlg_demo.cpp",
-      "src/ShapelyAlg/ShapelyAlg_test.cpp",
-      "src/ShapelyAlg/Stereo.cpp",
-      "src/CommonAlg/CommonAlg_FileUtil.cpp",
-      "src/CommonAlg/CommonAlg_Log.cpp"
+      "thrid/nlohmann_json/single_include/nlohmann/json.hpp"
     ],
     "includes": [
       "src",
       "src/Point3DAlg/include",
       "src/CommonAlg/include",
-      "src/ShapelyAlg",
-      "thrid/nlohmann_json/single_include",
-      "D:/pmy/alg/thrid/PCL-1.9.1/include/pcl-1.9",
-      "D:/pmy/alg/thrid/PCL-1.9.1/3rdParty/Boost/include/boost-1_68",
-      "D:/pmy/alg/thrid/PCL-1.9.1/3rdParty/Eigen/eigen3",
-      "D:/pmy/alg/thrid/PCL-1.9.1/3rdParty/FLANN/include",
-      "../../../alg/thrid/geos-3.15.0/include",
-      "D:/pmy/alg/thrid/PCL-1.9.1/3rdParty/VTK/include/vtk-8.1"
+      "thrid/nlohmann_json/single_include"
     ]
   }
 }

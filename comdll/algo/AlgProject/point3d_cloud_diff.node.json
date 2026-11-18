@@ -25,28 +25,32 @@
       "label": "栅格边长(mm)",
       "type": "number",
       "default": 0.1,
-      "min": 0.01
+      "min": 0.01,
+      "description": "对比格网边长（mm）"
     },
     {
       "name": "min_points",
       "label": "格最少点数",
       "type": "int",
       "default": 3,
-      "min": 1
+      "min": 1,
+      "description": "每格最少点数（不足的格不参与对比）"
     },
     {
       "name": "diff_threshold",
       "label": "超差阈值(mm,0=不判)",
       "type": "number",
       "default": 0.02,
-      "min": 0.0
+      "min": 0.0,
+      "description": "高度差判定阈值（mm；z=差值，正=被测高）"
     },
     {
       "name": "align_search",
       "label": "XY粗对齐搜索半径(mm,0=不对齐)",
       "type": "number",
       "default": 0.0,
-      "min": 0.0
+      "min": 0.0,
+      "description": "XY 自动对齐搜索半径（mm；≤0 = 不对齐）"
     }
   ],
   "outputs": [

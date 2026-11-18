@@ -20,39 +20,45 @@
       "name": "x0",
       "label": "起点X(mm)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "截面线段起点 X（mm）"
     },
     {
       "name": "y0",
       "label": "起点Y(mm)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "截面线段起点 Y（mm）"
     },
     {
       "name": "x1",
       "label": "终点X(mm)",
       "type": "number",
-      "default": 1.0
+      "default": 1.0,
+      "description": "截面线段终点 X（mm）"
     },
     {
       "name": "y1",
       "label": "终点Y(mm)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "截面线段终点 Y（mm）"
     },
     {
       "name": "band",
       "label": "带半宽(mm)",
       "type": "number",
       "default": 0.2,
-      "min": 0.01
+      "min": 0.01,
+      "description": "带半宽（mm；线段两侧投影带宽）"
     },
     {
       "name": "bin_size",
       "label": "弧长分格(mm)",
       "type": "number",
       "default": 0.1,
-      "min": 0.01
+      "min": 0.01,
+      "description": "弧长分格尺寸（mm；每格取带内中位高度）"
     }
   ],
   "outputs": [

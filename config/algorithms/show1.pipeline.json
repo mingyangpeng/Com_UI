@@ -1,0 +1,113 @@
+{
+  "Name": "show1",
+  "Locked": false,
+  "IsOperator": true,
+  "OperatorGroup": "\u4E1A\u52A1\u7B97\u5B50",
+  "Nodes": [
+    {
+      "Id": "c1a95051",
+      "Def": "source.image",
+      "Title": null,
+      "X": -29.758624999999938,
+      "Y": -22.36487499999999,
+      "Width": 190,
+      "Scope": null,
+      "Params": {
+        "pattern": "\u5706\u73AF"
+      }
+    },
+    {
+      "Id": "86c2e605",
+      "Def": "draw.2d",
+      "Title": null,
+      "X": 1098.8826250000027,
+      "Y": -140.2573749999998,
+      "Width": 250,
+      "Scope": null,
+      "Params": {}
+    },
+    {
+      "Id": "3cda47b7",
+      "Def": "img.gray",
+      "Title": null,
+      "X": 293.3412375000003,
+      "Y": -20.19838749999957,
+      "Width": 176,
+      "Scope": null,
+      "Params": {}
+    },
+    {
+      "Id": "ac3751e3",
+      "Def": "flow.for",
+      "Title": null,
+      "X": -244.68024999999994,
+      "Y": 208.92700000000082,
+      "Width": 218,
+      "Scope": {
+        "X": -322.2363506446742,
+        "Y": 35.19063318248146,
+        "W": 1240.505,
+        "H": 466.8425
+      },
+      "Params": {
+        "\u8D77\u59CB": 0,
+        "\u7EC8\u6B62": 10,
+        "\u6B65\u957F": 1
+      }
+    },
+    {
+      "Id": "7e0c3708",
+      "Def": "draw.2d",
+      "Title": null,
+      "X": 506.33312499999874,
+      "Y": 225.80725000000024,
+      "Width": 250,
+      "Scope": null,
+      "Params": {}
+    },
+    {
+      "Id": "d8561516",
+      "Def": "img.blur",
+      "Title": null,
+      "X": 170.35902978125037,
+      "Y": 255.03333260937524,
+      "Width": 176,
+      "Scope": null,
+      "Params": {}
+    }
+  ],
+  "Connections": [
+    {
+      "From": "c1a95051",
+      "FromPort": "\u56FE\u50CF",
+      "To": "3cda47b7",
+      "ToPort": "\u8F93\u5165",
+      "Feedback": false,
+      "Bend": -37
+    },
+    {
+      "From": "3cda47b7",
+      "FromPort": "\u8F93\u51FA",
+      "To": "86c2e605",
+      "ToPort": "\u8F93\u5165",
+      "Feedback": false,
+      "Bend": 0
+    },
+    {
+      "From": "d8561516",
+      "FromPort": "\u8F93\u51FA",
+      "To": "7e0c3708",
+      "ToPort": "\u8F93\u5165",
+      "Feedback": false,
+      "Bend": 0
+    },
+    {
+      "From": "3cda47b7",
+      "FromPort": "\u8F93\u51FA",
+      "To": "d8561516",
+      "ToPort": "\u8F93\u5165",
+      "Feedback": false,
+      "Bend": -55.968200000000024
+    }
+  ]
+}

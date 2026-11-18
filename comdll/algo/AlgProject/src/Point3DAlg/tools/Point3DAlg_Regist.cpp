@@ -114,6 +114,7 @@ const char* Point3DAlg_RegistStrategyName(int strategy)
     case POINT3DALG_REGIST_FPFH_RANSAC: return "FPFH+RANSAC";
     case POINT3DALG_REGIST_NDT:         return "NDT";
     case POINT3DALG_REGIST_PCA:         return "PCA-主轴粗配准";
+    case POINT3DALG_REGIST_MULTISCALE:  return "MultiscaleICP-金字塔";
     default:                            return "Unknown";
     }
 }
@@ -503,6 +504,23 @@ Point3DAlg_RegistStep Point3DAlg_RegistRun(
     case POINT3DALG_REGIST_PCA: {
         if (!RunPca(*source, *target, T, msg))
             return step;
+        break;
+    }
+    case POINT3DALG_REGIST_MULTISCALE: {
+        // 多尺度 ICP（Open3D multiscale_icp）：voxel 金字塔由 max_dist 自适应——
+        // 粗级 voxel=2×max_dist（对应距离 3×max_dist）覆盖较大初值偏差，
+        // 细级 voxel=0.3×max_dist 逼近单级 ICP 精度
+        const std::vector<double> voxels = { max_dist * 2.0, max_dist * 0.8, max_dist * 0.3 };
+        const std::vector<int> iters(3, std::max(params.max_iteration, 1));
+        float T16[16];
+        std::memcpy(T16, s.transform, sizeof(T16));
+        if (!shapely::CloudProcessor<pcl::PointXYZ>::registMultiscaleICP(
+                source, target, voxels, iters, 1.5, T16, s.transform)) {
+            msg = "MultiscaleICP 未收敛";
+            break;
+        }
+        T = ToEigen(T16);
+        msg = "MultiscaleICP";
         break;
     }
     default:

@@ -108,4 +108,29 @@ public class CppExporterTests
         // CMake 引用 main.cpp
         Assert.Contains("main.cpp", File.ReadAllText(Path.Combine(dir, "CMakeLists.txt")));
     }
+
+    [Fact]
+    public void Export_LoopGraph_EmitsGlobalCounterAndTemplateContract()
+    {
+        // 循环计数必须是文件级全局（g_i_<var>）：_run() 定义在 main 之外，
+        // 作用域内参数模板 {循环名.计数} 要引用到 → for 不再局部声明 int
+        var g = new GraphDocument();
+        var loop = new NodeInstance { DefId = "flow.for", X = 0, Y = 0 };
+        loop.Params["起始"] = 0;
+        loop.Params["终止"] = 3;
+        var body = new NodeInstance { DefId = "exp.a", X = 100, Y = 0 };
+        g.AddNode(loop);
+        g.AddNode(body);
+        g.Connect(loop.Id, "计数", body.Id, "输入");   // 作用域标记
+        var dir = ExportDir();
+
+        var err = CppExporter.Export(g, dir, "循环导出");
+        Assert.Null(err);
+
+        var main = File.ReadAllText(Path.Combine(dir, "main.cpp"));
+        Assert.Contains("static int g_i_n_", main);                  // 全局计数声明
+        Assert.Contains("for (g_i_", main);                           // for 使用全局计数
+        Assert.DoesNotContain("for (int g_i_", main);                 // 不再局部声明（_run 内不可见=模板引用必炸）
+        Assert.Contains("#include <string>", main);                   // 模板表达式依赖 std::string/std::to_string
+    }
 }

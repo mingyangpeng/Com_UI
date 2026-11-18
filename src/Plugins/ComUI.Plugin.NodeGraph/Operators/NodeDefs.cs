@@ -96,7 +96,7 @@ public static class NodeDefs
         // ==================== 处理 ====================
         new()
         {
-            Id = "img.gray", Name = "灰度化", Category = "处理", Group = "2D 图像",
+            Id = "img.gray", Name = "灰度化（内置）", Category = "处理", Group = "2D 图像",
             Inputs = new[] { new PortDef { Name = "输入", Type = PortType.Image } },
             Outputs = new[] { new PortDef { Name = "输出", Type = PortType.Image } },
             Execute = ctx => Img(ctx, px =>
@@ -308,6 +308,31 @@ public static class NodeDefs
             _all.Add(def);
             _mapCache = null;   // 失效重建
             return true;
+        }
+    }
+
+    /// <summary>移除一个算子（按 Id）。用于子流程算子重新保存后刷新定义。</summary>
+    public static bool Unregister(string id)
+    {
+        lock (_lock)
+        {
+            var old = _all.FirstOrDefault(d => d.Id.Equals(id, StringComparison.OrdinalIgnoreCase));
+            if (old is null) return false;
+            _all.Remove(old);
+            _mapCache = null;
+            return true;
+        }
+    }
+
+    /// <summary>注册或替换（Id 已存在则先移除旧的）。子流程算子改栏目/端口后需刷新定义。</summary>
+    public static void RegisterOrReplace(NodeDef def)
+    {
+        lock (_lock)
+        {
+            var old = _all.FirstOrDefault(d => d.Id.Equals(def.Id, StringComparison.OrdinalIgnoreCase));
+            if (old is not null) _all.Remove(old);
+            _all.Add(def);
+            _mapCache = null;
         }
     }
 

@@ -25,28 +25,32 @@
       "label": "NG阈值(mm)",
       "type": "number",
       "default": 0.02,
-      "min": 0.0
+      "min": 0.0,
+      "description": "高度差 NG 阈值（mm；|dh| > 阈值判 NG）"
     },
     {
       "name": "match_radius",
       "label": "XY匹配半径(mm)",
       "type": "number",
       "default": 0.3,
-      "min": 0.01
+      "min": 0.01,
+      "description": "bump 一对一配对搜索半径（mm；两片云 XY 需大致对齐）"
     },
     {
       "name": "height_threshold",
       "label": "bump判定高度(mm)",
       "type": "number",
       "default": 0.02,
-      "min": 0.0
+      "min": 0.0,
+      "description": "球顶拟合的基面分离高度阈值（mm）"
     },
     {
       "name": "cluster_tolerance",
       "label": "bump聚类连通距离(mm)",
       "type": "number",
       "default": 0.25,
-      "min": 0.01
+      "min": 0.01,
+      "description": "球顶拟合的聚类邻域半径（mm）"
     }
   ],
   "outputs": [

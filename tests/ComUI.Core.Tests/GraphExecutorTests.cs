@@ -323,4 +323,153 @@ public class GraphExecutorTests
         Assert.Equal(1, srcProbe.Runs);      // 作用域外：只执行一次
         Assert.Equal(3, bodyProbe.Runs);     // 作用域内：每次迭代执行
     }
+
+    // ==================== 参数模板 {计数} / {循环名.计数}（迭代期替换，宿主执行器） ====================
+
+    /// <summary>带参数快照的探针：记录每轮迭代收到的参数值（模板替换结果）。</summary>
+    private sealed class ParamProbe
+    {
+        public int Runs;
+        public readonly List<string> Seen = new();
+        public Dictionary<string, object?> Execute(NodeRunContext ctx)
+        {
+            Interlocked.Increment(ref Runs);
+            lock (Seen) { Seen.Add((ctx.Params.TryGetValue("folder", out var v) ? v?.ToString() : null) ?? ""); }
+            return new Dictionary<string, object?> { ["输出"] = new ImagePayload() };
+        }
+    }
+
+    private static (NodeDef Def, ParamProbe Probe) PDef(string id, params PortDef[] inputs)
+    {
+        var probe = new ParamProbe();
+        var def = new NodeDef
+        {
+            Id = id,
+            Name = id,
+            Category = "处理",
+            Inputs = inputs,
+            Outputs = new[] { new PortDef { Name = "输出", Type = PortType.Image } },
+            Execute = probe.Execute,
+        };
+        NodeDefs.Register(def);
+        return (def, probe);
+    }
+
+    private static NodeInstance LoopNode(double start, double end, double step = 1, string? title = null)
+    {
+        var n = new NodeInstance { DefId = "flow.for" };
+        n.Params["起始"] = (int)start;
+        n.Params["终止"] = (int)end;
+        n.Params["步长"] = (int)step;
+        if (title is not null) n.Title = title;
+        return n;
+    }
+
+    [Fact]
+    public async Task 循环模板_裸计数_单循环_替换为当前值_原文保留()
+    {
+        var inPort = new PortDef { Name = "输入", Type = PortType.Image };
+        var (def, probe) = PDef($"tpl.bare.{Guid.NewGuid():N}", inPort);
+        var g = new GraphDocument();
+        var loop = LoopNode(0, 3);
+        var body = Node(def.Id);
+        body.Params["folder"] = @"Z:\data\case_{计数}";
+        g.AddNode(loop);
+        g.AddNode(body);
+        g.Connect(loop.Id, "计数", body.Id, "输入");   // 作用域标记
+
+        var (failed, msg) = await Run(g);
+        Assert.False(failed, msg);
+        Assert.Equal(new[] { @"Z:\data\case_0", @"Z:\data\case_1", @"Z:\data\case_2" }, probe.Seen);
+        Assert.Equal(@"Z:\data\case_{计数}", body.Params["folder"]);   // 节点原文不动（卡片持续显示公式）
+    }
+
+    [Fact]
+    public async Task 循环模板_显式循环名_双循环各自取值()
+    {
+        var inPort = new PortDef { Name = "输入", Type = PortType.Image };
+        var (def, probe) = PDef($"tpl.named.{Guid.NewGuid():N}", inPort);
+        var g = new GraphDocument();
+        var loopA = LoopNode(0, 2, title: "外层");
+        var loopB = LoopNode(10, 13, title: "内层");
+        var body = Node(def.Id);
+        body.Params["folder"] = "{外层.计数}/{内层.计数}";
+        g.AddNode(loopA);
+        g.AddNode(loopB);
+        g.AddNode(body);
+        g.Connect(loopA.Id, "计数", body.Id, "输入");
+        g.Connect(loopB.Id, "计数", body.Id, "输入");
+
+        var (failed, msg) = await Run(g);
+        Assert.False(failed, msg);
+        Assert.Equal(new[] { "0/10", "1/11", "1/12" }, probe.Seen);   // A 序列 0,1（钳位末值）× B 序列 10,11,12
+    }
+
+    [Fact]
+    public async Task 循环模板_多循环裸计数歧义或未知名_保留原文()
+    {
+        var inPort = new PortDef { Name = "输入", Type = PortType.Image };
+        var (def, probe) = PDef($"tpl.amb.{Guid.NewGuid():N}", inPort);
+        var g = new GraphDocument();
+        var loopA = LoopNode(0, 2, title: "A");
+        var loopB = LoopNode(10, 12, title: "B");
+        var body = Node(def.Id);
+        body.Params["folder"] = "{计数}|{不存在.计数}";
+        g.AddNode(loopA);
+        g.AddNode(loopB);
+        g.AddNode(body);
+        g.Connect(loopA.Id, "计数", body.Id, "输入");
+        g.Connect(loopB.Id, "计数", body.Id, "输入");
+
+        var (failed, msg) = await Run(g);
+        Assert.False(failed, msg);
+        // 裸 {计数} 多循环歧义 + 未知名 → 原文保留（每次迭代同值）
+        Assert.All(probe.Seen, s => Assert.Equal("{计数}|{不存在.计数}", s));
+    }
+
+    [Fact]
+    public async Task 子流程入口绑定_预置输入端口_节点用预置值执行()
+    {
+        // 子流程算子入口：入度 0 且有输入端口的节点，父图数据以 (节点Id, 输入端口名) 预置。
+        // 此前执行器只认输出键预置 + missingInput 先跳过 → 入口节点永远被跳过、下游全灰（真 bug）。
+        var inPort = new PortDef { Name = "输入", Type = PortType.Image };
+        var (defEntry, entryProbe) = PDef($"sub.entry.{Guid.NewGuid():N}", inPort);
+        var g = new GraphDocument();
+        var entry = Node(defEntry.Id);
+        g.AddNode(entry);
+
+        var payload = new ImagePayload();
+        var presets = new Dictionary<(string, string), object?> { [(entry.Id, "输入")] = payload };
+        GraphExecutor.busPublish = (_, _) => { };
+        await GraphExecutor.RunAsync(g, (_, _, _) => { }, _ => { }, CancellationToken.None, presets);
+
+        Assert.Equal(1, entryProbe.Runs);   // 修复前：missingInput 先跳过 → 0
+    }
+
+    [Fact]
+    public async Task 框选作用域_混合模式_无矩形循环仍按连线闭包并入()
+    {
+        // 循环 A 有框选矩形（框住 bodyA）；循环 B 无矩形、连线到 bodyB。
+        // 修复前：scope 只算矩形 → B 的下游不在作用域内，只执行一次（真 bug）。
+        var (defA, probeA) = PDef($"mix.a.{Guid.NewGuid():N}");
+        var inPort = new PortDef { Name = "输入", Type = PortType.Image };
+        var (defB, probeB) = PDef($"mix.b.{Guid.NewGuid():N}", inPort);
+        var g = new GraphDocument();
+        var loopA = LoopNode(0, 2);
+        loopA.Scope = new ScopeRect { X = -10, Y = -10, W = 50, H = 50 };   // 覆盖 bodyA(0,0)
+        var bodyA = Node(defA.Id);                                          // (0,0) 在框内
+        var loopB = LoopNode(0, 3);
+        var bodyB = Node(defB.Id, 500, 500);                                // 远离框
+        g.AddNode(loopA);
+        g.AddNode(bodyA);
+        g.AddNode(loopB);
+        g.AddNode(bodyB);
+        g.Connect(loopB.Id, "计数", bodyB.Id, "输入");   // B 的作用域标记（闭包）
+
+        var (failed, msg) = await Run(g);
+        Assert.False(failed, msg);
+        int total = Math.Max(2, 3);
+        Assert.Equal(total, probeA.Runs);   // 框内：每次迭代执行（A 序列 2 次，总迭代取最大 3，钳位语义）
+        Assert.Equal(3, probeB.Runs);       // 修复前：不在 scope → 只跑 1 次
+    }
 }

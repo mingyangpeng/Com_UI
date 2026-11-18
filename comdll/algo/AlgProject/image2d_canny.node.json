@@ -22,7 +22,8 @@
       "type": "number",
       "default": 50,
       "min": 0,
-      "max": 1000
+      "max": 1000,
+      "description": "滞后阈值下限"
     },
     {
       "name": "threshold2",
@@ -30,7 +31,8 @@
       "type": "number",
       "default": 150,
       "min": 0,
-      "max": 1000
+      "max": 1000,
+      "description": "滞后阈值上限（经验取 2~3 倍 threshold1）"
     }
   ],
   "outputs": [

@@ -22,7 +22,8 @@
       "type": "number",
       "default": 1,
       "min": 0.1,
-      "max": 4
+      "max": 4,
+      "description": "分辨率倒数"
     },
     {
       "name": "min_dist",
@@ -30,7 +31,8 @@
       "type": "number",
       "default": 10,
       "min": 1,
-      "max": 10000
+      "max": 10000,
+      "description": "圆心最小间距（像素）"
     },
     {
       "name": "param1",
@@ -38,7 +40,8 @@
       "type": "number",
       "default": 50,
       "min": 1,
-      "max": 1000
+      "max": 1000,
+      "description": "内部 Canny 高阈值"
     },
     {
       "name": "param2",
@@ -46,7 +49,8 @@
       "type": "number",
       "default": 20,
       "min": 1,
-      "max": 1000
+      "max": 1000,
+      "description": "圆心投票阈值（越小检出圆越多）"
     },
     {
       "name": "min_r",
@@ -54,7 +58,8 @@
       "type": "number",
       "default": 5,
       "min": 0,
-      "max": 10000
+      "max": 10000,
+      "description": "最小半径（像素）"
     },
     {
       "name": "max_r",
@@ -62,7 +67,8 @@
       "type": "number",
       "default": 0,
       "min": 0,
-      "max": 10000
+      "max": 10000,
+      "description": "最大半径（≤0 不限）"
     }
   ],
   "outputs": [

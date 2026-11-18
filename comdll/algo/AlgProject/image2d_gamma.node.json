@@ -4,7 +4,7 @@
     "name": "Gamma 校正",
     "group": "2D 图像",
     "category": "处理",
-    "description": "图像 Gamma 非线性校正"
+    "description": "图像 Gamma 非线性校正（>1 提亮、<1 压暗，LUT 实现）；输出 alpha 强制 255"
   },
   "runtime": "native",
   "assembly": "Image2DAlg.dll",
@@ -22,7 +22,8 @@
       "type": "number",
       "default": 1.0,
       "min": 0.1,
-      "max": 5.0
+      "max": 5.0,
+      "description": "Gamma 系数：>1 提亮、<1 压暗、=1 原图（<0.05 核心层钳制；LUT 实现）"
     }
   ],
   "outputs": [
@@ -37,13 +38,11 @@
       "integration/comui/comui_native_abi.h",
       "src/AlgExport.h",
       "src/Image2DAlg/Image2DAlg_api.cpp",
-      "src/Image2DAlg/Image2DAlg_Ops.cpp",
       "src/Image2DAlg/include/Image2DAlg_api.h"
     ],
     "includes": [
       "src",
-      "src/Image2DAlg/include",
-      "src/ShapelyAlg"
+      "src/Image2DAlg/include"
     ]
   }
 }

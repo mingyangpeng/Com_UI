@@ -218,4 +218,68 @@ public class GraphModelTests
         var n4 = Node("test.b", 0, 0);
         Assert.Null(n4.Width);
     }
+
+    [Fact]
+    public void LoadFromJson_PreservesSavedNodeIds()
+    {
+        // 子流程参数键锚定节点 Id 的前提：保存 Id 跨加载稳定（子图里改名节点不再使参数覆盖失配）
+        var g = new GraphDocument();
+        var n1 = Node("test.a", 0, 0);
+        var n2 = Node("test.b", 10, 10);
+        g.AddNode(n1);
+        g.AddNode(n2);
+        g.Connect(n1.Id, "out", n2.Id, "in");
+
+        var g2 = new GraphDocument();
+        g2.LoadFromJson(g.Serialize("t"));
+
+        Assert.Equal(n1.Id, g2.Nodes.First(n => n.DefId == "test.a").Id);
+        Assert.Equal(n2.Id, g2.Nodes.First(n => n.DefId == "test.b").Id);
+        Assert.Single(g2.Connections);   // 连线按保留的 Id 重映射不丢
+    }
+
+    [Fact]
+    public void LoadFromJson_DuplicateIdsInFile_FreshIdForLater()
+    {
+        // 手改损坏文件：重复 Id → 后者发新 Id 兜底（防 byId 字典构建炸键冲突），加载不失败
+        const string json = """
+            { "Name": "t", "Nodes": [
+              { "Id": "dup1", "Def": "test.a", "X": 0, "Y": 0 },
+              { "Id": "dup1", "Def": "test.b", "X": 5, "Y": 5 }
+            ], "Connections": [] }
+            """;
+        var g = new GraphDocument();
+        g.LoadFromJson(json);
+
+        Assert.Equal(2, g.Nodes.Count);
+        Assert.NotEqual(g.Nodes[0].Id, g.Nodes[1].Id);   // 冲突已消解
+        Assert.Equal("dup1", g.Nodes[0].Id);             // 第一个保留原 Id
+        Assert.Equal("test.b", g.Nodes[1].DefId);
+    }
+
+    [Fact]
+    public void NodeJsonRegistry_ParamDescriptions_LoadedFromAlgProject()
+    {
+        // alg 算子库 41 个 node.json 全部带参数级 description（"算子属性说明"交付契约）：
+        // json → JsonParam.description → AlgoParam.Description 全链路，属性面板悬浮提示/副文本消费
+        var comdll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "comdll"));
+        var defs = NodeJsonRegistry.LoadFrom(comdll, _ => { }).ToList();
+        Assert.True(defs.Count >= 40, $"alg 算子应 >= 40，实际 {defs.Count}");
+
+        var bin = defs.First(d => d.Id == "alg.image2d.binarize");
+        Assert.Equal("二值化", bin.Name);   // 新算子上架
+        Assert.Contains("双阈值三值化", bin.Description);
+        Assert.Equal("0 二值 / 1 反二值 / 2 OTSU / 3 自适应均值 / 4 自适应高斯 / 5 TRUNC / 6 TOZERO / 7 TOZERO_INV / 8 双阈值区间内 / 9 双阈值区间外 / 10 双阈值三值化",
+                     bin.Params.First(p => p.Name == "mode").Description);
+
+        var sick = defs.First(d => d.Id == "alg.point3d.read_sick");
+        Assert.Contains("Scan3DPart", sick.Params.First(p => p.Name == "folder").Description);
+        Assert.Contains("全部帧合并", sick.Params.First(p => p.Name == "frame").Description);
+
+        // 全量：节点说明 + 参数说明双覆盖 100%（"算子属性说明"交付契约）
+        Assert.All(defs, d => Assert.False(string.IsNullOrWhiteSpace(d.Description), d.Id + " 缺节点说明"));
+        var noDesc = defs.Where(d => d.Params.Length > 0 && d.Params.Any(p => string.IsNullOrWhiteSpace(p.Description)))
+                         .Select(d => d.Id).ToList();
+        Assert.Empty(noDesc);
+    }
 }

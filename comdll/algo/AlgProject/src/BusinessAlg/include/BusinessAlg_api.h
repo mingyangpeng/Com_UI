@@ -27,8 +27,10 @@ extern "C" {
 // 流程：点云 → 高度过滤(Stereo) → 2.5D 投影(Geom) → 区域面积/占比
 // 说明：这是骨架示例，用于验证跨模块组合与链接；实际业务算子请按上述步骤追加。
 //
-// 参数：min_z / max_z 高度区间；roi_x/y/w/h 感兴趣区域矩形
+// 参数：xyz/count  点云交错数组 [x0,y0,z0,...] 与点数（z 为高度）
+//       min_z / max_z 高度区间；roi_x/y/w/h 感兴趣区域矩形
 // 输出：defect_ratio（ROI 内有效点投影面积 / ROI 面积）、area（有效投影面积，mm²）
+// 返回：0 成功；-1 空指针/参数非法（count<=0、roi_w/h<=0）；2 ROI 内无有效投影
 BUSINESSALG_EXPORT int BusinessAlg_ComputeRegionRatio(const float* xyz, int count,
                                                       double min_z, double max_z,
                                                       double roi_x, double roi_y,

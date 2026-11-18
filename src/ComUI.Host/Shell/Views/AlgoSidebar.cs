@@ -35,8 +35,11 @@ public sealed class AlgoSidebar : UserControl
 
     private string? _copiedPath;        // Ctrl+C 复制的算法文件路径
     private string? _lastClickedPath;   // 最近单击选中的算法行（复制/粘贴的操作对象）
-    private Button? _selectedRow;
     private TextBox? _renameBox;        // 行内改名进行中（期间放行 TextBox 自身的 Ctrl+C 文本复制）
+
+    private readonly HashSet<string> _selectedPaths = new();      // 多选集合（全选/批量删除）
+    private readonly Dictionary<string, Button> _rowByPath = new(); // 路径→行按钮（高亮刷新用）
+    private bool _ctrlDown;   // Ctrl 按住状态（Ctrl+单击 = 多选切换）
 
     public AlgoSidebar(Action<AlgoRecord, AlgoCommand> onRun, IBus bus)
     {
@@ -66,6 +69,7 @@ public sealed class AlgoSidebar : UserControl
         // 文件基础操作：Ctrl+C 复制选中的算法，Ctrl+V 粘贴为解锁副本（改名进行中时放行 TextBox 文本操作）
         KeyDown += (_, e) =>
         {
+            if (e.Key is Key.LeftCtrl or Key.RightCtrl) _ctrlDown = true;
             if (_renameBox is not null) return;
             if (e.KeyModifiers.HasFlag(KeyModifiers.Control) && e.Key == Key.C)
             {
@@ -84,6 +88,10 @@ public sealed class AlgoSidebar : UserControl
                 e.Handled = true;
                 DeleteSelected();
             }
+        };
+        KeyUp += (_, e) =>
+        {
+            if (e.Key is Key.LeftCtrl or Key.RightCtrl) _ctrlDown = false;
         };
     }
 
@@ -159,17 +167,13 @@ public sealed class AlgoSidebar : UserControl
     {
         _pipelineSection.Children.Clear();
         _pipelineRows.Clear();
+        _rowByPath.Clear();
         var dir = Path.Combine(AppPaths.RepoRoot, "config", "algorithms");
         var files = Directory.Exists(dir)
             ? Directory.EnumerateFiles(dir, "*.pipeline.json").ToList()
             : new List<string>();
-        _pipelineSection.Children.Add(new TextBlock
-        {
-            Text = "流水线算法",
-            FontSize = 11.5,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x8A, 0x92)),
-            Margin = new Thickness(6, 10, 0, 4),
-        });
+        _selectedPaths.RemoveWhere(p => !files.Contains(p));   // 清掉已不存在的选择
+        _pipelineSection.Children.Add(BuildPipelineHeader(files));
         if (files.Count == 0)
         {
             _pipelineSection.Children.Add(new TextBlock
@@ -229,24 +233,26 @@ public sealed class AlgoSidebar : UserControl
                 },
             };
             lockBtn.SetValue(Grid.ColumnProperty, 1);
-            if (path == _lastClickedPath)
-            {
-                _selectedRow = row;
+            if (_selectedPaths.Contains(path))
                 row.Background = SelectedBrush;
-            }
-            // 单击 = 延迟打开（等待可能的第二击）；双击 = 行内改名（统一用 Sdk.Ui 组件，BUG-059 教训）
+            _rowByPath[path] = row;
+            // 单击 = 选中（Ctrl+单击 = 多选切换）；双击 = 行内改名（统一用 Sdk.Ui 组件，BUG-059 教训）
             var dbl = new DoubleClickDetector();
             DispatcherTimer? pendingOpen = null;
             row.Click += (_, _) =>
             {
-                // 单击同时选中该行（Ctrl+C 复制对象），高亮反馈
-                if (!ReferenceEquals(_selectedRow, row))
+                // Ctrl+单击 = 多选切换；普通单击 = 只选中该行（Ctrl+C 复制对象）
+                if (_ctrlDown)
                 {
-                    if (_selectedRow is not null) _selectedRow.Background = Brushes.Transparent;
-                    _selectedRow = row;
-                    row.Background = SelectedBrush;
+                    if (!_selectedPaths.Add(path)) _selectedPaths.Remove(path);
+                }
+                else
+                {
+                    _selectedPaths.Clear();
+                    _selectedPaths.Add(path);
                 }
                 _lastClickedPath = path;
+                UpdateRowHighlights();
                 pendingOpen?.Stop();
                 pendingOpen = null;
                 if (dbl.IsDouble())
@@ -269,6 +275,112 @@ public sealed class AlgoSidebar : UserControl
         }
         if (_pipelineRows.Count > 0)
             _pipelineRows[0].InvalidateMeasure();
+    }
+
+    /// <summary>「流水线算法」标题行：左侧标题，右侧 4 个小图标按钮（全选 / 全锁 / 解锁 / 删除）。</summary>
+    private Control BuildPipelineHeader(List<string> files)
+    {
+        Control MakeToolBtn(object content, string tip, Action click)
+        {
+            var btn = new Button
+            {
+                Content = content,
+                Background = Brushes.Transparent,
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(4, 1),
+                MinWidth = 22,
+                MinHeight = 20,
+                FontSize = 12,
+                Foreground = new SolidColorBrush(Color.FromRgb(0x9A, 0x9A, 0xA2)),
+                VerticalAlignment = VerticalAlignment.Center,
+                Cursor = new Cursor(StandardCursorType.Hand),
+            };
+            ToolTip.SetTip(btn, tip);
+            btn.Click += (_, e) => { e.Handled = true; click(); };
+            return btn;
+        }
+
+        var strip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+
+        // 全选：全部算法加入多选集合（Ctrl+单击行可逐个增减；再点一次取消全选）
+        strip.Children.Add(MakeToolBtn("☑", "全选（Ctrl+单击行可增减）", () =>
+        {
+            if (_selectedPaths.Count == files.Count && files.Count > 0)
+            {
+                _selectedPaths.Clear();
+                LogMessage?.Invoke("已取消全选");
+            }
+            else
+            {
+                foreach (var f in files) _selectedPaths.Add(f);
+                LogMessage?.Invoke($"已全选 {files.Count} 个算法（删除键批量删、Ctrl+C 复制最后一个点选的）");
+            }
+            UpdateRowHighlights();
+        }));
+
+        // 全锁 / 解锁：对全部算法统一写 Locked 字段（不依赖选择，操作对象明确）
+        strip.Children.Add(MakeToolBtn(LockGlyph.Build(true), "全部锁定", () =>
+        {
+            foreach (var f in files) FileLock.Set(f, true);
+            foreach (var f in files) _bus.Publish(BusTopics.AlgoLocked, f);   // 已打开页面同步只读状态
+            RefreshPipelines();
+            LogMessage?.Invoke($"已锁定全部 {files.Count} 个算法（只读保护）");
+        }));
+        strip.Children.Add(MakeToolBtn(LockGlyph.Build(false), "全部解锁", () =>
+        {
+            foreach (var f in files) FileLock.Set(f, false);
+            foreach (var f in files) _bus.Publish(BusTopics.AlgoLocked, f);
+            RefreshPipelines();
+            LogMessage?.Invoke($"已解锁全部 {files.Count} 个算法");
+        }));
+
+        // 删除：批量删除选中的（锁定的跳过并提示）
+        strip.Children.Add(MakeToolBtn("🗑", "删除选中的算法（锁定的跳过）", () =>
+        {
+            if (_selectedPaths.Count == 0)
+            {
+                LogMessage?.Invoke("先选择算法再删除：单击选中、Ctrl+单击多选，或点 ☑ 全选");
+                return;
+            }
+            int deleted = 0, skipped = 0;
+            foreach (var p in _selectedPaths.ToList())
+            {
+                if (!File.Exists(p)) continue;
+                if (FileLock.IsLocked(p)) { skipped++; continue; }
+                try { File.Delete(p); deleted++; } catch (Exception ex) { LogMessage?.Invoke($"删除「{NameOf(p)}」失败: {ex.Message}"); }
+            }
+            _selectedPaths.Clear();
+            _lastClickedPath = null;
+            _copiedPath = null;
+            RefreshPipelines();
+            LogMessage?.Invoke(skipped > 0
+                ? $"已删除 {deleted} 个算法；{skipped} 个已锁定被跳过（解锁后再删）"
+                : $"已删除 {deleted} 个算法");
+        }));
+
+        var title = new TextBlock
+        {
+            Text = "流水线算法",
+            FontSize = 11.5,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x8A, 0x92)),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var header = new Grid
+        {
+            ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+            Margin = new Thickness(6, 10, 0, 4),
+            Children = { title, strip },
+        };
+        title.SetValue(Grid.ColumnProperty, 0);
+        strip.SetValue(Grid.ColumnProperty, 1);   // 必须显式设列：否则两者都落在第 0 列重叠成一团
+        return header;
+    }
+
+    /// <summary>按多选集合刷新所有行的选中高亮。</summary>
+    private void UpdateRowHighlights()
+    {
+        foreach (var (p, row) in _rowByPath)
+            row.Background = _selectedPaths.Contains(p) ? SelectedBrush : Brushes.Transparent;
     }
 
     /// <summary>双击行内改名（Sdk.Ui.InlineRename 统一组件）：重命名文件 + 刷新列表 + 通知流水线插件。</summary>

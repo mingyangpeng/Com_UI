@@ -4,7 +4,7 @@
     "name": "缩放",
     "group": "2D 图像",
     "category": "处理",
-    "description": "缩放到目标尺寸"
+    "description": "缩放到目标尺寸（插值 0 近邻/1 线性/2 立方/3 面积/4 Lanczos4）"
   },
   "runtime": "native",
   "assembly": "Image2DAlg.dll",
@@ -22,7 +22,8 @@
       "type": "int",
       "default": 640,
       "min": 1,
-      "max": 10000
+      "max": 10000,
+      "description": "目标宽（像素）"
     },
     {
       "name": "out_height",
@@ -30,7 +31,8 @@
       "type": "int",
       "default": 480,
       "min": 1,
-      "max": 10000
+      "max": 10000,
+      "description": "目标高（像素）"
     },
     {
       "name": "interpolation",
@@ -38,7 +40,8 @@
       "type": "int",
       "default": 1,
       "min": 0,
-      "max": 4
+      "max": 4,
+      "description": "0 近邻 / 1 线性 / 2 立方 / 3 面积 / 4 Lanczos4"
     }
   ],
   "outputs": [

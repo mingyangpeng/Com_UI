@@ -30,7 +30,8 @@
       "type": "int",
       "default": 3,
       "min": 0,
-      "max": 5
+      "max": 5,
+      "description": "匹配方法（仅 0/3 支持，默认 3=CCORR_NORMED）"
     }
   ],
   "outputs": [

@@ -4,7 +4,7 @@
     "name": "模糊降噪",
     "group": "2D 图像",
     "category": "处理",
-    "description": "method 0 高斯/1 中值/2 双边"
+    "description": "模糊降噪：0 高斯 / 1 中值 / 2 双边（通道保持）"
   },
   "runtime": "native",
   "assembly": "Image2DAlg.dll",
@@ -22,7 +22,8 @@
       "type": "int",
       "default": 0,
       "min": 0,
-      "max": 2
+      "max": 2,
+      "description": "0 高斯 / 1 中值 / 2 双边"
     },
     {
       "name": "ksize",
@@ -30,7 +31,8 @@
       "type": "int",
       "default": 3,
       "min": 1,
-      "max": 51
+      "max": 51,
+      "description": "核尺寸（自动补奇；双边滤波时=邻域直径）"
     },
     {
       "name": "sigma1",
@@ -38,7 +40,8 @@
       "type": "number",
       "default": 0,
       "min": 0,
-      "max": 100
+      "max": 100,
+      "description": "高斯 X 方向 sigma；双边滤波时=颜色 sigma"
     },
     {
       "name": "sigma2",
@@ -46,7 +49,8 @@
       "type": "number",
       "default": 0,
       "min": 0,
-      "max": 100
+      "max": 100,
+      "description": "高斯 Y 方向 sigma；双边滤波时=空间 sigma"
     }
   ],
   "outputs": [

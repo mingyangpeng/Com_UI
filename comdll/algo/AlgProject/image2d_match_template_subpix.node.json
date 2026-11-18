@@ -26,7 +26,8 @@
       "type": "int",
       "default": 5,
       "min": 0,
-      "max": 5
+      "max": 5,
+      "description": "cv::TemplateMatchModes（默认 5=归一化相关）"
     }
   ],
   "outputs": [

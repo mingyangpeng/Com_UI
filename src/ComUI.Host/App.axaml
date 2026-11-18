@@ -54,9 +54,41 @@
         <Style Selector="Button.primary:pressed /template/ ContentPresenter">
             <Setter Property="Background" Value="#0A6CD6"/>
         </Style>
+        <!-- 危险操作按钮（macOS 红色：删除/清空等破坏性确认） -->
+        <Style Selector="Button.danger">
+            <Setter Property="Background" Value="#D93A3A"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="Padding" Value="18,5"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="MinHeight" Value="28"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style Selector="Button.danger:pointer /template/ ContentPresenter">
+            <Setter Property="Background" Value="#E85050"/>
+        </Style>
+        <Style Selector="Button.danger:pressed /template/ ContentPresenter">
+            <Setter Property="Background" Value="#BF2E2E"/>
+        </Style>
         <Style Selector="Button.primary:disabled /template/ ContentPresenter">
             <Setter Property="Background" Value="#313437"/>
             <Setter Property="Foreground" Value="#9D9D9D"/>
+        </Style>
+
+        <!-- 算子库搜索框：去掉 FluentTheme 焦点蓝框，保留输入功能（外由宿主 Border 画胶囊底） -->
+        <Style Selector="TextBox.searchbox">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+        </Style>
+        <Style Selector="TextBox.searchbox:focus /template/ Border#border">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+        </Style>
+        <Style Selector="TextBox.searchbox:pointerover /template/ Border#border">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="Transparent"/>
         </Style>
 
         <!-- 对话框输入控件（macOS 内嵌深色 + 细边框） -->

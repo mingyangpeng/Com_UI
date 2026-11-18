@@ -7,22 +7,23 @@ using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
+using Avalonia.Threading;
 using ComUI.Sdk;
 using ComUI.Sdk.Ui;
 
 namespace ComUI.Plugin.NodeGraph;
 
 /// <summary>
-/// 「算子库」侧边栏：顶部搜索框 + 按分组栏目折叠的算子列表（全宽行、统一对齐）。
-/// 拖拽到流水线画布 = 在落点创建节点；单击 = 添加到当前流水线页面中心。
-/// 栏目（分组）头支持按住拖动排序——架构与宿主「面板」列表同一套（PluginListSidebar）：
+/// 「算子库」侧边栏（macOS 风格）：顶部搜索框 + 一级分组栏目 + 二级子模块 + 图标卡片网格。
+/// 算子以「小图标 + 名称」卡片呈现（两列自动换行），替代旧版全宽逐行罗列——大幅缩短纵向长度；
+/// 每个一级分组内按语义再分二级子模块（OperatorGlyphs 推导），方便快速查找。
+/// 拖拽到流水线画布 = 在落点创建节点；单击 = 右侧属性面板显示说明+参数编辑+加入画布。
+/// 栏目（一级分组）头支持按住拖动排序——架构与宿主「面板」列表同一套（PluginListSidebar）：
 /// Content 结构稳定（Rebuild 只重填内部列表，绝不整体替换——旧实现连搜索框一起冲掉），
 /// 容器级按下/移动/释放状态机（capture 在控件上，命中表驱动）。
 /// 栏目头：按下-移动超 5px = 排序拖拽（落点横线指示），原地点击 = 折叠/展开；搜索过滤时禁用排序。
-/// 栏目头右端图钉（PinGlyph）：按下（蓝竖钉）= 该栏目钉住禁拖，拔起（灰斜钉）= 可拖动排序。
-/// 栏目顺序与图钉状态持久化在 config/op_order.json（旧版纯数组格式自动兼容）。
-/// 单击算子行 = 右侧属性面板显示该算子（说明+参数编辑+加入画布，IPanelParamsProvider 自更新控件）；
-/// 拖拽 = 直接放置（用面板当前参数）。
+/// 栏目顺序持久化在 config/op_order.json（旧版纯数组格式自动兼容）。
+/// 拖拽卡片 = 直接放置（用面板当前参数）。
 /// </summary>
 public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProvider
 {
@@ -34,7 +35,6 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
     public event Action<string, PixelPoint>? OperatorPlaced;
 
     private readonly HashSet<string> _collapsedGroups = new();
-    private readonly HashSet<string> _pinnedGroups = new();    // 图钉按下的栏目（禁拖，持久化）
     private string _filter = "";
     private string? _selectedDefId;                            // 属性面板当前显示的算子 Id（单击行切换）
     /// <summary>算子参数覆盖（面板里编辑的值）：defId → 参数名 → 文本。加入画布时由宿主应用到新节点。</summary>
@@ -42,8 +42,8 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
     private readonly Dictionary<string, Dictionary<string, string>> _paramOverrides = new();
     private readonly List<string> _groupOrder = new();        // 栏目显示顺序（拖拽排序，持久化）
     private readonly Dictionary<string, Border> _headerIndex = new();   // 栏目名 → 头（视觉顺序，命中用）
-    private readonly Dictionary<string, Border> _pinIndex = new();      // 栏目名 → 图钉命中区
     private readonly StackPanel _listPanel = new() { Spacing = 0 };     // 列表容器（Rebuild 只重填它）
+    private Border? _selectedCard;                            // 当前选中卡片（选中态蓝色高亮）
     private readonly Border _dropLine = new()                 // 栏目落点指示（目标头上/下缘蓝色横线）
     {
         Background = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF)),
@@ -55,31 +55,117 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
         IsVisible = false,
     };
     private readonly string? _orderPath;                      // 栏目顺序持久化文件（null=不持久化）
+    private readonly IBus? _bus;                              // 总线：点击算子时推送属性栏展示（PropsShow）
 
     // —— 容器级栏目排序状态机（与「面板」列表同一套） ——
     private string? _pressGroup;                              // 按下的栏目头（未达拖拽阈值）
     private Point _pressPos;
     private string? _dragGroup;                               // 排序拖拽中的栏目名
 
-    private static readonly Brush Dim = new SolidColorBrush(Color.FromRgb(0x9D, 0x9D, 0x9D));
-    private static readonly Brush Hint = new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x7C));
-    private static readonly Brush Hairline = new SolidColorBrush(Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF));
-    private static readonly Brush GroupBg = new SolidColorBrush(Color.FromRgb(0x2A, 0x2A, 0x2E));
+    // macOS 深色配色：柔和层级灰 + 系统蓝强调 + 细分隔线
+    private static readonly Brush Dim = new SolidColorBrush(Color.FromRgb(0x98, 0x98, 0xA0));
+    private static readonly Brush Hint = new SolidColorBrush(Color.FromRgb(0x7C, 0x7C, 0x84));
+    private static readonly Brush Hairline = new SolidColorBrush(Color.FromArgb(0x1A, 0xFF, 0xFF, 0xFF));
+    private static readonly Brush GroupBg = new SolidColorBrush(Color.FromRgb(0x28, 0x28, 0x2C));
     private static readonly Brush SelectBlue = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF));
+    private static readonly Brush CardBg = new SolidColorBrush(Color.FromRgb(0x2C, 0x2C, 0x31));
+    private static readonly Brush CardHover = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x41));
+    private static readonly Brush CardSelected = new SolidColorBrush(Color.FromArgb(0x38, 0x0A, 0x84, 0xFF));
+    private static readonly Brush SubText = new SolidColorBrush(Color.FromRgb(0x8A, 0x8A, 0x92));
 
-    public NodeLibraryView(string? orderPath = null)
+    public NodeLibraryView(string? orderPath = null, IBus? bus = null)
     {
         _orderPath = orderPath;
+        _bus = bus;
         LoadOrder();
 
-        var search = new TextBox
+        // macOS 风格搜索框：胶囊圆角、放大镜图标、内嵌清除按钮
+        var searchBox = new TextBox
         {
-            Watermark = "搜索算子…",
-            Margin = new Thickness(8, 8, 8, 4),
-            MinHeight = 28,
+            Watermark = "搜索算子",
+            Classes = { "searchbox" },   // App.axaml 里覆盖焦点蓝框（保留输入功能）
             FontSize = 12,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            VerticalContentAlignment = VerticalAlignment.Center,
+            MinHeight = 26,
         };
-        search.TextChanged += (_, _) => { _filter = search.Text ?? ""; Rebuild(); };
+        searchBox.TextChanged += (_, _) => { _filter = searchBox.Text ?? ""; Rebuild(); };
+        var clearBtn = new Button
+        {
+            Content = "✕",
+            FontSize = 10,
+            Foreground = Dim,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            Width = 20, Height = 20,
+            Padding = new Thickness(0),
+            Cursor = new Cursor(StandardCursorType.Arrow),
+            IsVisible = false,
+        };
+        clearBtn.Click += (_, _) => searchBox.Text = "";
+        searchBox.TextChanged += (_, _) => clearBtn.IsVisible = !string.IsNullOrEmpty(searchBox.Text);
+        var searchIcon = new TextBlock { Text = "⌕", FontSize = 16, Foreground = Dim, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) };
+        var searchGrid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,*,Auto") };
+        searchGrid.Children.Add(searchIcon);
+        searchBox.SetValue(Grid.ColumnProperty, 1);
+        searchGrid.Children.Add(searchBox);
+        clearBtn.SetValue(Grid.ColumnProperty, 2);
+        searchGrid.Children.Add(clearBtn);
+        var search = new Border
+        {
+            Child = searchGrid,
+            Background = CardBg,
+            BorderBrush = Hairline,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(9),
+            Padding = new Thickness(9, 3, 5, 3),
+            Margin = new Thickness(10, 10, 4, 6),
+            Height = 32,
+        };
+
+        // 折叠/展开全部栏目按钮（macOS 小图标按钮，状态随当前折叠情况切换）
+        var foldBtn = new Button
+        {
+            Width = 32, Height = 32, Padding = new Thickness(0),
+            HorizontalContentAlignment = HorizontalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 10, 10, 6),
+            Cursor = new Cursor(StandardCursorType.Hand),
+        };
+        foldBtn.Classes.Add("ghost");
+        void UpdateFoldVisual()
+        {
+            var groups = NodeDefs.All.Select(d => d.Group).Distinct().ToList();
+            bool anyExpanded = groups.Any(g => !_collapsedGroups.Contains(g));
+            foldBtn.Content = new TextBlock
+            {
+                Text = anyExpanded ? "⊟" : "⊞",   // ⊟=收起全部, ⊞=展开全部
+                FontSize = 15,
+                Foreground = Dim,
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+            };
+            ToolTip.SetTip(foldBtn, anyExpanded ? "折叠所有栏目" : "展开所有栏目");
+        }
+        foldBtn.Click += (_, _) =>
+        {
+            var groups = NodeDefs.All.Select(d => d.Group).Distinct().ToList();
+            bool anyExpanded = groups.Any(g => !_collapsedGroups.Contains(g));
+            if (anyExpanded)
+                foreach (var g in groups) _collapsedGroups.Add(g);
+            else
+                _collapsedGroups.Clear();
+            UpdateFoldVisual();
+            Rebuild();
+        };
+        UpdateFoldVisual();
+
+        var topRow = new Grid { ColumnDefinitions = new ColumnDefinitions("*,Auto") };
+        topRow.Children.Add(search);
+        foldBtn.SetValue(Grid.ColumnProperty, 1);
+        topRow.Children.Add(foldBtn);
 
         var scroll = new ScrollViewer
         {
@@ -88,7 +174,7 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
         };
 
         var root = new Grid { RowDefinitions = new RowDefinitions("Auto,*") };
-        root.Children.Add(search);
+        root.Children.Add(topRow);
         scroll.SetValue(Grid.RowProperty, 1);
         root.Children.Add(scroll);
         Content = new Grid
@@ -108,7 +194,6 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
         {
             if (_pressGroup is { } pg && _dragGroup is null)
             {
-                if (_pinnedGroups.Contains(pg)) return;   // 图钉按下 = 钉住禁拖
                 var p = e.GetPosition(this);
                 if (Math.Abs(p.X - _pressPos.X) <= 5 && Math.Abs(p.Y - _pressPos.Y) <= 5) return;
                 _dragGroup = pg;
@@ -128,12 +213,6 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
             var pos = e.GetPosition(this);
             if (!wasDragging)
             {
-                // 图钉点击优先：命中图钉 = 切换钉住状态（不触发折叠/排序）
-                if (pressGroup is { } pg && HitPin(pos, pg) is not null)
-                {
-                    TogglePin(pg);
-                    return;
-                }
                 // 原地点击栏目头 = 折叠/展开
                 if (pressGroup is not null && HitHeader(pos)?.Key == pressGroup)
                 {
@@ -149,8 +228,6 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
             if (dragGroup is null || HitHeader(pos, dragGroup) is not { } hit ||
                 hit.Value.TranslatePoint(new Point(0, 0), this) is not { } t)
                 return;   // 落点没命中栏目头 = 取消，顺序不变
-            if (_pinnedGroups.Contains(hit.Key))
-                return;   // 落点栏目被图钉钉住：位置固定，不接收插入（拖动取消，顺序不变）
 
             var after = pos.Y > t.Y + hit.Value.Bounds.Height / 2;
             foreach (var g in NodeDefs.All.GroupBy(d => d.Group).Select(g => g.Key))
@@ -165,9 +242,9 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
 
     public void Dispose() { }
 
-    // ==================== 栏目顺序与图钉（拖拽排序 + 持久化） ====================
+    // ==================== 栏目顺序（拖拽排序 + 持久化） ====================
 
-    /// <summary>op_order.json 兼容两种格式：旧版纯数组 <c>["栏目A","栏目B"]</c>；新版对象 <c>{"Order":[...],"Pinned":[...]}</c>。</summary>
+    /// <summary>op_order.json 兼容两种格式：旧版纯数组 <c>["栏目A","栏目B"]</c>；新版对象 <c>{"Order":[...]}</c>。</summary>
     private void LoadOrder()
     {
         if (_orderPath is null || !File.Exists(_orderPath)) return;
@@ -180,7 +257,7 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
                 foreach (var el in root.EnumerateArray())
                     if (el.ValueKind == System.Text.Json.JsonValueKind.String && !string.IsNullOrWhiteSpace(el.GetString()))
                         _groupOrder.Add(el.GetString()!);
-                return;   // 旧版纯数组：只有顺序，无图钉
+                return;   // 旧版纯数组：只有顺序
             }
             if (root.ValueKind == System.Text.Json.JsonValueKind.Object)
             {
@@ -188,10 +265,6 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
                     foreach (var el in order.EnumerateArray())
                         if (el.ValueKind == System.Text.Json.JsonValueKind.String && !string.IsNullOrWhiteSpace(el.GetString()))
                             _groupOrder.Add(el.GetString()!);
-                if (root.TryGetProperty("Pinned", out var pinned) && pinned.ValueKind == System.Text.Json.JsonValueKind.Array)
-                    foreach (var el in pinned.EnumerateArray())
-                        if (el.ValueKind == System.Text.Json.JsonValueKind.String && !string.IsNullOrWhiteSpace(el.GetString()))
-                            _pinnedGroups.Add(el.GetString()!);
             }
         }
         catch { }   // 顺序文件损坏=回退注册顺序
@@ -206,28 +279,10 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
             var obj = new System.Text.Json.Nodes.JsonObject
             {
                 ["Order"] = new System.Text.Json.Nodes.JsonArray(_groupOrder.Select(n => (System.Text.Json.Nodes.JsonNode?)n).ToArray()),
-                ["Pinned"] = new System.Text.Json.Nodes.JsonArray(_pinnedGroups.Select(n => (System.Text.Json.Nodes.JsonNode?)n).ToArray()),
             };
             File.WriteAllText(_orderPath, obj.ToJsonString(new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
         }
         catch { }   // 保存失败只影响下次启动的顺序
-    }
-
-    /// <summary>切换栏目图钉（按下=禁拖 / 拔起=可拖）并持久化。</summary>
-    private void TogglePin(string group)
-    {
-        if (!_pinnedGroups.Remove(group)) _pinnedGroups.Add(group);
-        SaveOrder();
-        Rebuild();
-    }
-
-    /// <summary>指针是否落在指定栏目的图钉命中区上。</summary>
-    private Border? HitPin(Point pos, string group)
-    {
-        if (!_pinIndex.TryGetValue(group, out var pin)) return null;
-        if (pin.TranslatePoint(new Point(0, 0), this) is not { } t) return null;
-        if (pos.X < t.X || pos.X > t.X + pin.Bounds.Width || pos.Y < t.Y || pos.Y > t.Y + pin.Bounds.Height) return null;
-        return pin;
     }
 
     /// <summary>指针下的栏目头（exclude=拖拽来源栏目）。</summary>
@@ -260,13 +315,14 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
     // ==================== 列表构建 ====================
 
     /// <summary>只重填内部列表（Content 结构稳定——搜索框/落点指示线永不脱离可视树）。</summary>
-    private void Rebuild() => RebuildList();
+    /// <summary>重建算子库列表（外部算子注册变化后调用，如转算子即时刷新）。</summary>
+    public void Rebuild() => RebuildList();
 
     private void RebuildList()
     {
         _listPanel.Children.Clear();
         _headerIndex.Clear();
-        _pinIndex.Clear();
+        _selectedCard = null;
 
         // ===== 算子分组：栏目按拖拽顺序（未登记的新栏目按注册顺序续后），过滤搜索词 =====
         var groups = NodeDefs.All.GroupBy(d => d.Group).ToList();
@@ -284,9 +340,26 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
             _headerIndex[group.Key] = header;
             _listPanel.Children.Add(header);
 
-            if (expanded)
-                foreach (var def in defs)
-                    _listPanel.Children.Add(OperatorRow(def));
+            if (!expanded) continue;
+
+            // 二级子模块：按 OperatorGlyphs 推导的 Sub 分组，注册顺序续排
+            var subGroups = defs.Select(d => (Def: d, Vis: OperatorGlyphs.For(d)))
+                                .GroupBy(x => x.Vis.Sub).ToList();
+            foreach (var sub in subGroups)
+            {
+                // 搜索结果里若该组只有 1 项且子模块标题冗余，仅 1 个二级分组时省略标题
+                if (subGroups.Count > 1)
+                    _listPanel.Children.Add(SubHeader(sub.Key, sub.Count()));
+
+                var grid = new WrapPanel
+                {
+                    Orientation = Orientation.Horizontal,
+                    Margin = new Thickness(8, subGroups.Count > 1 ? 2 : 5, 8, 8),
+                };
+                foreach (var x in sub)
+                    grid.Children.Add(OperatorCard(x.Def, x.Vis));
+                _listPanel.Children.Add(grid);
+            }
         }
 
         if (_filter.Length > 0 && _listPanel.Children.Count == 0)
@@ -307,62 +380,51 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
     private bool MatchFilter(string name) =>
         _filter.Length == 0 || name.Contains(_filter, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>栏目头（无自带指针处理器——排序状态机收在容器级）。
-    /// 右端图钉：按下（蓝竖钉）= 钉住禁拖，拔起（灰斜钉）= 可拖动排序；点击切换（容器级判定，不触发折叠）。</summary>
+    /// <summary>栏目头（无自带指针处理器——排序状态机收在容器级）。</summary>
     private Border GroupHeader(string name, int count, bool expanded)
     {
+        var (groupIcon, groupAccent) = OperatorGlyphs.ForGroup(name);
+        var icon = new Border
+        {
+            Width = 18, Height = 18,
+            CornerRadius = new CornerRadius(5),
+            Background = new SolidColorBrush(Color.FromArgb(0x30, groupAccent.R, groupAccent.G, groupAccent.B)),
+            Child = new Viewbox { Width = 12, Height = 12, Child = new TextBlock { Text = groupIcon, FontSize = 11 } },
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 7, 0),
+        };
         var arrow = new TextBlock
         {
             Text = expanded ? "▾" : "▸",
             FontSize = 10,
             Foreground = Dim,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 6, 0),
+            Margin = new Thickness(0, 0, 5, 0),
         };
         var title = new TextBlock
         {
             Text = name,
             FontSize = 12,
             FontWeight = FontWeight.SemiBold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xE8, 0xE8, 0xEC)),
             VerticalAlignment = VerticalAlignment.Center,
         };
         var countText = new TextBlock
         {
             Text = count.ToString(),
-            FontSize = 11,
+            FontSize = 10.5,
             Foreground = Dim,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(6, 0, 0, 0),
+            Margin = new Thickness(7, 0, 0, 0),
         };
-        var pinned = _pinnedGroups.Contains(name);
-        var pin = new Border
-        {
-            Width = 20, Height = 20,          // 命中区比图标大（14×14 图标 + 手指容差）
-            Background = Brushes.Transparent,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Cursor = new Cursor(StandardCursorType.Hand),
-            Child = new Canvas   // 图标在命中区内居中
-            {
-                Width = 20, Height = 20,
-                Children =
-                {
-                    PinGlyph.Build(pinned),
-                },
-            },
-        };
-        var pinIcon = (Canvas)pin.Child!;
-        Canvas.SetLeft(pinIcon.Children[0], 3);
-        Canvas.SetTop(pinIcon.Children[0], 3);
-
-        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*,Auto") };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,Auto,*") };
+        grid.Children.Add(icon);
+        arrow.SetValue(Grid.ColumnProperty, 1);
         grid.Children.Add(arrow);
-        title.SetValue(Grid.ColumnProperty, 1);
+        title.SetValue(Grid.ColumnProperty, 2);
         grid.Children.Add(title);
-        countText.SetValue(Grid.ColumnProperty, 2);
+        countText.SetValue(Grid.ColumnProperty, 3);
         grid.Children.Add(countText);
-        pin.SetValue(Grid.ColumnProperty, 3);
-        grid.Children.Add(pin);
 
         var header = new Border
         {
@@ -370,19 +432,56 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
             Background = GroupBg,
             BorderBrush = Hairline,
             BorderThickness = new Thickness(0, 0, 0, 1),
-            Padding = new Thickness(10, 0, 8, 0),
-            // 与搜索框同宽内收：全宽贴边时色带比其它内容更靠左，视觉上像溢出到活动栏
-            Margin = new Thickness(8, 0, 8, 0),
-            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(9, 0, 7, 0),
+            Margin = new Thickness(8, 4, 8, 0),
+            CornerRadius = new CornerRadius(7),
             Cursor = new Cursor(StandardCursorType.Hand),
             Child = grid,
         };
-        ToolTip.SetTip(header, pinned
-            ? "图钉按下：栏目已钉住，不可拖动排序（点击图钉拔起恢复）"
-            : "按住拖动可排序栏目；点击折叠/展开；右端图钉按下 = 钉住禁拖");
-        ToolTip.SetTip(pin, pinned ? "拔起图钉（恢复可拖动排序）" : "按下图钉（钉住该栏目，禁止拖动排序）");
-        _pinIndex[name] = pin;
+        ToolTip.SetTip(header, "按住拖动可排序栏目；点击折叠/展开");
         return header;
+    }
+
+    /// <summary>二级子模块标题：细体灰字 + 左侧短线，轻量不抢分组头视觉。</summary>
+    private Border SubHeader(string name, int count)
+    {
+        var bar = new Border
+        {
+            Width = 2, Height = 11,
+            Background = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF)),
+            CornerRadius = new CornerRadius(1),
+            Margin = new Thickness(0, 0, 6, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var label = new TextBlock
+        {
+            Text = name,
+            FontSize = 11,
+            FontWeight = FontWeight.SemiBold,
+            Foreground = SubText,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var num = new TextBlock
+        {
+            Text = count.ToString(),
+            FontSize = 10,
+            Foreground = Hint,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(6, 0, 0, 0),
+        };
+        var grid = new Grid { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,Auto,*") };
+        grid.Children.Add(bar);
+        label.SetValue(Grid.ColumnProperty, 1);
+        grid.Children.Add(label);
+        num.SetValue(Grid.ColumnProperty, 2);
+        grid.Children.Add(num);
+        return new Border
+        {
+            Child = grid,
+            Height = 18,
+            Margin = new Thickness(13, 6, 13, 0),
+            Padding = new Thickness(2, 0, 0, 0),
+        };
     }
 
     // ==================== 算子条目 ====================
@@ -391,8 +490,6 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
     /// 参数编辑值存 _paramOverrides——加入画布时由宿主应用到新节点（覆盖算子默认值）。</summary>
     // ==================== 右侧属性面板（IPanelParamsProvider） ====================
 
-    private TextBlock? _paramsTitle;
-    private TextBlock? _paramsDesc;
     private StackPanel? _paramsEditorHost;
     private Button? _paramsAddBtn;
 
@@ -400,73 +497,134 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
     /// 未选中时显示提示；选中后显示说明 + 参数编辑器 + 「加入画布」。</summary>
     public Control? CreateParamsContent()
     {
+        var root = CreateParamsContentOnce();
+        RefreshParamsContent();
+        return root;
+    }
+
+    /// <summary>
+    /// 单击算子卡片：刷新自绘参数控件，并通过总线把算子的说明/信息行/参数控件推给宿主属性栏。
+    /// Tool 侧边栏不进标签页，无法走 CreateParamsContent 自动挂载——这是主动推送通道。
+    /// </summary>
+    private void PushOperatorToProps(NodeDef def)
+    {
+        // 确保参数控件已创建（宿主 Launch 时不会为 Tool 面板调用 CreateParamsContent）
+        var content = CreateParamsContentOnce();
+        RefreshParamsContent();
+
+        if (_bus is null) return;
+        var vis = OperatorGlyphs.For(def);
+        var rows = new List<(string, string)>
+        {
+            ("类型 Id", def.Id),
+            ("分组", def.Group),
+            ("子模块", vis.Sub),
+            ("类别", def.Category),
+            ("输入端口", def.Inputs.Length == 0 ? "无" : string.Join("、", def.Inputs.Select(p => p.Name))),
+            ("输出端口", def.Outputs.Length == 0 ? "无" : string.Join("、", def.Outputs.Select(p => p.Name))),
+            ("参数个数", def.Params.Length.ToString()),
+        };
+        _bus.Publish(BusTopics.PropsShow, new PropsRequest
+        {
+            SectionTitle = "算子",
+            Title = $"{vis.Icon}  {def.Name}",
+            Description = string.IsNullOrEmpty(def.Description) ? "（该算子未提供详细说明）" : def.Description,
+            Rows = rows,
+            ParamsContent = content,
+        });
+    }
+
+    /// <summary>
+    /// 每次构建全新的参数控件根。Avalonia 控件只能有一个视觉父级——
+    /// 宿主 SetParams 每次 Clear+Add，若复用同一实例会触发 "already has a visual parent"，
+    /// 异常被总线吞掉后属性栏整体不更新。故改为每次点击新建（旧实例随 Clear 被丢弃）。
+    /// </summary>
+    private Control CreateParamsContentOnce() => BuildParamsRoot();
+
+    private Control BuildParamsRoot()
+    {
+        // 标题/说明已由宿主对象卡（PropsRequest.Title/Description）显示，此处不重复——只放编辑器 + 操作。
         var root = new StackPanel { Spacing = 6 };
-        _paramsTitle = new TextBlock { FontSize = 12, FontWeight = FontWeight.SemiBold };
-        _paramsDesc = new TextBlock { FontSize = 11, Foreground = Dim, TextWrapping = TextWrapping.Wrap };
         _paramsEditorHost = new StackPanel { Spacing = 6 };
         _paramsAddBtn = new Button
         {
             Content = "➕ 加入画布",
-            Classes = { "ghost" },
-            FontSize = 11,
+            Classes = { "primary" },
+            FontSize = 11.5,
             HorizontalAlignment = HorizontalAlignment.Stretch,
         };
         _paramsAddBtn.Click += (_, _) => { if (_selectedDefId is not null) OperatorClicked?.Invoke(_selectedDefId); };
-        root.Children.Add(_paramsTitle);
-        root.Children.Add(_paramsDesc);
         root.Children.Add(_paramsEditorHost);
         root.Children.Add(_paramsAddBtn);
-        RefreshParamsContent();
         return root;
     }
 
     /// <summary>行点击：把选中算子的说明/参数编辑器刷新进右侧属性面板（编辑值写 _paramOverrides）。</summary>
     private void RefreshParamsContent()
     {
-        if (_paramsTitle is null || _paramsDesc is null || _paramsEditorHost is null || _paramsAddBtn is null)
+        if (_paramsEditorHost is null || _paramsAddBtn is null)
             return;
         _paramsEditorHost.Children.Clear();
         if (_selectedDefId is null || !NodeDefs.Map.TryGetValue(_selectedDefId, out var def))
         {
-            _paramsTitle.Text = "未选中算子";
-            _paramsDesc.Text = "单击算子行查看说明并设置参数";
             _paramsAddBtn.IsVisible = false;
             return;
         }
-        _paramsTitle.Text = def.Name;
-        _paramsDesc.Text = string.IsNullOrEmpty(def.Description) ? def.Id : def.Description;
         _paramsAddBtn.IsVisible = true;
 
         var overrides = _paramOverrides.TryGetValue(def.Id, out var ov) ? ov : new Dictionary<string, string>();
         if (!_paramOverrides.ContainsKey(def.Id)) _paramOverrides[def.Id] = overrides;
+        const double fieldW = 92;   // 输入框固定窄宽（macOS 表单：标签占左、控件右对齐、不撑满）
         foreach (var p in def.Params)
         {
-            var row = new Grid { ColumnDefinitions = new ColumnDefinitions("76,*") };
-            row.Children.Add(new TextBlock
+            var row = new Grid
+            {
+                ColumnDefinitions = new ColumnDefinitions("*,Auto"),
+                Margin = new Thickness(0, 3),
+            };
+            var labelHost = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            labelHost.Children.Add(new TextBlock
             {
                 Text = p.Label,
                 FontSize = 11,
                 Foreground = Dim,
-                VerticalAlignment = VerticalAlignment.Center,
+                TextWrapping = TextWrapping.Wrap,
             });
+            if (!string.IsNullOrWhiteSpace(p.Description))
+            {
+                labelHost.Children.Add(new TextBlock
+                {
+                    Text = p.Description, FontSize = 10, Foreground = Dim,
+                    TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 1, 10, 0),
+                    Opacity = 0.75,
+                });
+                ToolTip.SetTip(row, p.Description);
+            }
+            row.Children.Add(labelHost);
             Control editor;
             var current = overrides.TryGetValue(p.Name, out var ovText) && ovText is not null ? ovText : p.Default?.ToString() ?? "";
             switch (p.Type)
             {
                 case ComUI.Sdk.AlgoParamType.Boolean:
-                    var cb = new CheckBox { IsChecked = current == "True" || current == "true", HorizontalAlignment = HorizontalAlignment.Left };
+                    var cb = new CheckBox { IsChecked = current == "True" || current == "true", HorizontalAlignment = HorizontalAlignment.Right };
                     cb.IsCheckedChanged += (_, _) => overrides[p.Name] = cb.IsChecked == true ? "true" : "false";
                     editor = cb;
                     break;
                 case ComUI.Sdk.AlgoParamType.Enum when p.Options is { } opts:
-                    var combo = new ComboBox { MinHeight = 24, FontSize = 11 };
+                    var combo = new ComboBox { Width = fieldW, MinHeight = 24, FontSize = 11, HorizontalAlignment = HorizontalAlignment.Right };
                     foreach (var o in opts) combo.Items.Add(o);
                     combo.SelectedIndex = Math.Max(0, opts.ToList().IndexOf(current));
                     combo.SelectionChanged += (_, _) => overrides[p.Name] = combo.SelectedItem?.ToString() ?? "";
                     editor = combo;
                     break;
                 default:
-                    var tb = new TextBox { Text = current, MinHeight = 24, FontSize = 11.5, Padding = new Thickness(6, 1, 6, 1) };
+                    var tb = new TextBox
+                    {
+                        Text = current, Width = fieldW, MinHeight = 24, FontSize = 11,
+                        Padding = new Thickness(6, 3, 6, 3),
+                        HorizontalAlignment = HorizontalAlignment.Right,
+                        CornerRadius = new CornerRadius(5),
+                    };
                     tb.TextChanged += (_, _) => overrides[p.Name] = tb.Text;
                     editor = tb;
                     break;
@@ -479,10 +637,10 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
             _paramsEditorHost.Children.Add(new TextBlock { Text = "本算子无参数", FontSize = 11, Foreground = Dim });
     }
 
-    private Control OperatorRow(NodeDef def)
+    private Control OperatorCard(NodeDef def, OpVisual vis)
     {
         var defId = def.Id;
-        var item = MakeRow(CategoryColor(def.Category), def.Name);
+        var item = MakeCard(vis, def.Name);
 
         Point? pressPoint = null;
         bool moving = false;
@@ -493,7 +651,6 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
             pressPoint = e.GetPosition(item);
             moving = false;
             e.Pointer.Capture(item);
-            item.Background = SelectBlue;
         };
 
         item.PointerMoved += (_, e) =>
@@ -511,75 +668,114 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
             pressPoint = null;
             moving = false;
             e.Pointer.Capture(null);
-            ResetItem(item);
 
             if (wasMoving)
             {
+                ApplyCardVisual(item, false, false);
                 var screen = item.PointToScreen(e.GetPosition(item));
                 OperatorPlaced?.Invoke(defId, screen);
             }
             else
             {
-                // 单击 = 右侧属性面板显示该算子（说明+参数编辑+加入画布）——不再直接建节点
+                // 单击行为：第一次 = 选中（属性面板显示说明/参数）；再次单击已选中算子 = 添加到当前显示的流水线页。
+                bool alreadySelected = _selectedDefId == defId;
+                if (_selectedCard is not null && _selectedCard != item) ApplyCardVisual(_selectedCard, false, false);
+                _selectedCard = item;
+                ApplyCardVisual(item, true, false);
                 _selectedDefId = defId;
-                RefreshParamsContent();
+                PushOperatorToProps(def);
+
+                if (alreadySelected)
+                {
+                    // 复用「加入画布」回调：它把算子加到当前显示的流水线页（_activeEditor），并应用面板参数覆盖。
+                    OperatorClicked?.Invoke(defId);
+                    FlashCard(item);   // 短暂脉冲反馈，表明已添加
+                }
             }
         };
 
-        item.PointerExited += (_, _) => { if (pressPoint is null) ResetItem(item); };
+        item.PointerEntered += (_, _) => { if (pressPoint is null && item != _selectedCard) ApplyCardVisual(item, false, true); };
+        item.PointerExited += (_, _) => { if (pressPoint is null && item != _selectedCard) ApplyCardVisual(item, false, false); };
         ToolTip.SetTip(item, def.Id);
         return item;
     }
 
-    /// <summary>算子行：固定行高 28，色点 + 名称（算子 Id 在 ToolTip）。</summary>
-    private Border MakeRow(Color dotColor, string text)
+    /// <summary>
+    /// 算子卡片：竖向图标视图（macOS Launchpad 风格）——图标在上、完整名称在下（两行内）。
+    /// 紧凑 54×56，图标 18×18、名称 FontSize=9 允许换行完整显示，算子 Id 在 ToolTip。
+    /// </summary>
+    private Border MakeCard(OpVisual vis, string text)
     {
+        var iconBox = new Border
+        {
+            Width = 18, Height = 18,
+            CornerRadius = new CornerRadius(5),
+            Background = new SolidColorBrush(Color.FromArgb(0x2E, vis.Accent.R, vis.Accent.G, vis.Accent.B)),
+            Child = new Viewbox { Width = 12, Height = 12, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center,
+                                  Child = new TextBlock { Text = vis.Icon, FontSize = 12 } },
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
         var label = new TextBlock
         {
             Text = text,
-            FontSize = 12.5,
-            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 9,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xDE, 0xDE, 0xE3)),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Top,
+            TextAlignment = TextAlignment.Center,
+            TextWrapping = TextWrapping.Wrap,
+            MaxLines = 2,
+            LineHeight = 11,
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
-
         var content = new StackPanel
         {
-            Orientation = Orientation.Horizontal,
-            Spacing = 8,
+            Orientation = Orientation.Vertical,
+            Spacing = 3,
+            HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(14, 0, 0, 0),
-            Children =
-            {
-                new Border
-                {
-                    Width = 9,
-                    Height = 9,
-                    CornerRadius = new CornerRadius(2),
-                    Background = new SolidColorBrush(dotColor),
-                    VerticalAlignment = VerticalAlignment.Center,
-                },
-                label,
-            },
+            Children = { iconBox, label },
         };
 
         return new Border
         {
-            Height = 30,
-            Background = Brushes.Transparent,
-            Margin = new Thickness(8, 1, 8, 1),
-            CornerRadius = new CornerRadius(6),
+            Width = 54,
+            Height = 56,
+            Background = CardBg,
+            BorderBrush = Hairline,
+            BorderThickness = new Thickness(1),
+            Padding = new Thickness(2, 4, 2, 3),
+            Margin = new Thickness(1.5),
+            CornerRadius = new CornerRadius(8),
             Cursor = new Cursor(StandardCursorType.Hand),
             Child = content,
         };
     }
 
-    private static void ResetItem(Border item) =>
-        item.Background = Brushes.Transparent;
-
-    private static Color CategoryColor(string category) => category switch
+    /// <summary>统一切换卡片三态：选中（蓝底白字）/ hover（浅灰）/ 常态。</summary>
+    private static void ApplyCardVisual(Border card, bool selected, bool hover)
     {
-        "源" => Color.FromRgb(0x2F, 0x6B, 0x3A),
-        "输出" => Color.FromRgb(0x8A, 0x5A, 0x1F),
-        _ => Color.FromRgb(0x15, 0x5A, 0x8A),
-    };
+        card.Background = selected ? CardSelected : hover ? CardHover : CardBg;
+        card.BorderBrush = selected ? SelectBlue : Hairline;
+    }
+
+    /// <summary>再次点击已选中算子并加入画布后，短暂把边框闪成绿色作反馈，再恢复选中态。</summary>
+    private void FlashCard(Border card)
+    {
+        var green = new SolidColorBrush(Color.FromRgb(0x30, 0xD1, 0x76));
+        card.BorderBrush = green;
+        card.BorderThickness = new Thickness(2);
+        var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(320) };
+        EventHandler? tick = null;
+        tick = (_, _) =>
+        {
+            timer.Stop();
+            timer.Tick -= tick;
+            card.BorderThickness = new Thickness(1);
+            // 仅当仍是当前选中卡片才恢复选中态视觉，避免与其它卡片状态错乱
+            ApplyCardVisual(card, ReferenceEquals(card, _selectedCard), false);
+        };
+        timer.Tick += tick;
+        timer.Start();
+    }
 }

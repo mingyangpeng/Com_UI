@@ -94,6 +94,8 @@
 
 namespace shapely {
 
+// cv::Rect / cv::RotatedRect（OpenCV 整数/浮点矩形）→ Geom 面对象的便捷转换。
+// 全静态工具类，用于把 OpenCV 检测结果（ROI 框/旋转焊盘）接入几何布尔运算。
 class GeomCVAdapter
 {
 public:
@@ -112,6 +114,7 @@ public:
         return Geom::createPolygon(corners);
     }
 
+    // cv::Rect2d 显式重载（坐标本身已是 double，与模板版行为一致）
     static Geom createRect(const cv::Rect2d& r)
     {
         return createRect<cv::Rect2d>(r);
@@ -139,6 +142,8 @@ public:
 
 namespace shapely {
 
+// pcl::PointCloud（任意点型，含 XYZ/XYZRGBA/XYZI 等）→ Stereo 点集的便捷转换。
+// 仅提取 x/y/z 三坐标；点型字段差异不影响转换。
 class StereoPCLAdapter
 {
 public:
@@ -170,6 +175,8 @@ public:
 
 namespace shapely {
 
+// HeightMap（不规则格网高度图）→ cv::Mat 灰度图，衔接 ImageProcessor 全链
+//（先 toImage 再走 2D 算子）。
 class HeightMapAdapter
 {
 public:

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Avalonia.Controls;
 
 namespace ComUI.Sdk;
 
@@ -44,6 +45,13 @@ public static class BusTopics
 
     /// <summary>激活/聚焦一个窗口面板（载荷=面板 Id，如 "ui.cloud3d.view"）——数据树点击行名跳转对应工作台用。</summary>
     public const string PanelActivate = "ui/activate-panel";
+
+    /// <summary>
+    /// 请求宿主右侧属性栏显示自定义内容（载荷 PropsRequest）。
+    /// 供 Tool 侧边栏（算子库等）用：它们不进标签页、无法走 CreateParamsContent 自动挂载，
+    /// 故点击列表项时主动推送「标题/说明/参数控件」到属性栏。
+    /// </summary>
+    public const string PropsShow = "ui/props-show";
 }
 
 /// <summary>数据总线：算法 ↔ 显示的桥梁。按主题发布/订阅，每个主题保留最新一帧。</summary>
@@ -86,6 +94,20 @@ public interface IBus
 
 /// <summary>主题快照信息。</summary>
 public sealed record BusTopicInfo(string Topic, string? LatestType, long FrameCount, DateTime? LastPublish);
+
+/// <summary>
+/// 属性栏自定义展示载荷（BusTopics.PropsShow）：Tool 侧边栏请求宿主属性栏显示选中项详情。
+/// Rows = 键值信息行；Description = 长说明；SectionTitle = 分区标题（如"算子"）。
+/// 参数编辑由插件自绘，通过 <see cref="ParamsContent"/> 携带（插件持有实例，宿主直接挂）。
+/// </summary>
+public sealed class PropsRequest
+{
+    public string SectionTitle { get; init; } = "对象";
+    public string Title { get; init; } = "";
+    public string? Description { get; init; }
+    public IReadOnlyList<(string Key, string Value)> Rows { get; init; } = Array.Empty<(string, string)>();
+    public Control? ParamsContent { get; init; }
+}
 
 /// <summary>图像帧载荷。**契约 = OpenCV 模式**：布局与 cv::Mat(CV_8UC4) 完全一致——
 /// 行主序、逐像素交错 B,G,R,A、**紧排列（step = Width×4，无行对齐填充）**。

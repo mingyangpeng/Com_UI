@@ -22,7 +22,8 @@
       "type": "int",
       "default": 2,
       "min": 0,
-      "max": 6
+      "max": 6,
+      "description": "0 腐蚀 / 1 膨胀 / 2 开 / 3 闭 / 4 梯度 / 5 顶帽 / 6 黑帽"
     },
     {
       "name": "shape",
@@ -30,7 +31,8 @@
       "type": "int",
       "default": 0,
       "min": 0,
-      "max": 2
+      "max": 2,
+      "description": "结构元形状：0 矩形 / 1 十字 / 2 椭圆"
     },
     {
       "name": "ksize",
@@ -38,7 +40,8 @@
       "type": "int",
       "default": 3,
       "min": 1,
-      "max": 51
+      "max": 51,
+      "description": "结构元边长"
     },
     {
       "name": "iterations",
@@ -46,7 +49,8 @@
       "type": "int",
       "default": 1,
       "min": 1,
-      "max": 20
+      "max": 20,
+      "description": "重复次数"
     }
   ],
   "outputs": [

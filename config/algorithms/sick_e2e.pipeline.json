@@ -1,6 +1,6 @@
 {
   "Name": "sick_e2e",
-  "Locked": false,
+  "Locked": true,
   "IsOperator": true,
   "Nodes": [
     {
@@ -28,9 +28,9 @@
   "Connections": [
     {
       "From": "sicksrc01",
-      "FromPort": "点云",
+      "FromPort": "\u70B9\u4E91",
       "To": "voxel01",
-      "ToPort": "输入"
+      "ToPort": "\u8F93\u5165"
     }
   ]
 }

@@ -22,7 +22,8 @@
       "type": "int",
       "default": 1,
       "min": 0,
-      "max": 1
+      "max": 1,
+      "description": "1=只取最外层轮廓"
     },
     {
       "name": "min_area",
@@ -30,7 +31,8 @@
       "type": "number",
       "default": 1,
       "min": 0,
-      "max": 10000000
+      "max": 10000000,
+      "description": "面积过滤（像素²）"
     }
   ],
   "outputs": [

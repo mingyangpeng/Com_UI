@@ -21,73 +21,84 @@
       "label": "bump判定高度(mm)",
       "type": "number",
       "default": 0.02,
-      "min": 0.0
+      "min": 0.0,
+      "description": "bump 与基面的分离高度阈值（mm）"
     },
     {
       "name": "cluster_tolerance",
       "label": "聚类连通距离(mm)",
       "type": "number",
       "default": 0.25,
-      "min": 0.01
+      "min": 0.01,
+      "description": "欧式聚类邻域半径（mm）"
     },
     {
       "name": "height_min",
       "label": "高度NG下限(mm,0=不判)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "高度 NG 判定下限（mm；>0 才启用高度判定）"
     },
     {
       "name": "height_max",
       "label": "高度NG上限(mm,0=不判)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "高度 NG 判定上限（mm）"
     },
     {
       "name": "diameter_min",
       "label": "直径NG下限(mm,0=不判)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "直径 NG 判定下限（mm；>0 才启用直径判定）"
     },
     {
       "name": "diameter_max",
       "label": "直径NG上限(mm,0=不判)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "直径 NG 判定上限（mm）"
     },
     {
       "name": "nominal_pitch_x",
       "label": "名义网格X间距(mm,0=不判位置度)",
       "type": "number",
       "default": 0.0,
-      "min": 0.0
+      "min": 0.0,
+      "description": "标称间距 X（mm；XY 均 >0 启用位置度判定）"
     },
     {
       "name": "nominal_pitch_y",
       "label": "名义网格Y间距(mm)",
       "type": "number",
       "default": 0.0,
-      "min": 0.0
+      "min": 0.0,
+      "description": "标称间距 Y（mm）"
     },
     {
       "name": "nominal_origin_x",
       "label": "名义网格原点X(mm)",
       "type": "number",
       "default": 0.0,
-      "min": 0.0
+      "min": 0.0,
+      "description": "标称阵列原点 X（mm）"
     },
     {
       "name": "nominal_origin_y",
       "label": "名义网格原点Y(mm)",
       "type": "number",
       "default": 0.0,
-      "min": 0.0
+      "min": 0.0,
+      "description": "标称阵列原点 Y（mm）"
     },
     {
       "name": "pos_threshold",
       "label": "位置度NG阈值(mm)",
       "type": "number",
       "default": 0.05,
-      "min": 0.0
+      "min": 0.0,
+      "description": "位置度 NG 阈值（mm）"
     }
   ],
   "outputs": [

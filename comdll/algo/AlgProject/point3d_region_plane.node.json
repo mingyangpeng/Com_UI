@@ -20,27 +20,31 @@
       "name": "x",
       "label": "ROI左上X(mm)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "ROI 左上角 X（mm）"
     },
     {
       "name": "y",
       "label": "ROI左上Y(mm)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "ROI 左上角 Y（mm）"
     },
     {
       "name": "w",
       "label": "ROI宽W(mm)",
       "type": "number",
       "default": 1.0,
-      "min": 0.001
+      "min": 0.001,
+      "description": "ROI 宽（mm）"
     },
     {
       "name": "h",
       "label": "ROI高H(mm)",
       "type": "number",
       "default": 1.0,
-      "min": 0.001
+      "min": 0.001,
+      "description": "ROI 高（mm）"
     }
   ],
   "outputs": [],

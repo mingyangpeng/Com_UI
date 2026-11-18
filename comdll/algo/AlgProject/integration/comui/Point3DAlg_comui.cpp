@@ -192,7 +192,7 @@ extern "C" POINT3DALG_EXPORT int Point3DAlg_ComuiManualRegist(const AlgoCInput* 
         if (in->params[i].kind == 0) { max_dist = in->params[i].d; break; }
     // 简化实现：node.json params 顺序 = [strategy(int), init_transform(text),
     //                                     max_distance(number), max_iteration(int)]
-    if (strategy < 1 || strategy > 6) strategy = 1;
+    if (strategy < 1 || strategy > 7) strategy = 1;
     if (max_iter < 1) max_iter = 1;
     if (tfText && Point3DAlg_RegistParseTransformText(tfText, init_T)) {
         // 解析成功；失败时保持单位阵（参数注释里给出默认 16 值即单位阵）
@@ -215,6 +215,11 @@ extern "C" POINT3DALG_EXPORT int Point3DAlg_ComuiManualRegist(const AlgoCInput* 
     rp.max_correspondence_dist = max_dist;
     rp.max_iteration = max_iter;
     Point3DAlg_RegistStep step = Point3DAlg_RegistRun(session, src, dst, rp);
+    // 契约：未收敛（fitness < 0）时变换未定义，不得输出垃圾点云/T——返回 rc=2
+    if (step.fitness < 0.0) {
+        out->error = "配准未收敛（初值偏差超出策略覆盖范围或对应不足）";
+        return 2;
+    }
 
     // 输出配准后的点云（源 × T）
     pcl::PointCloud<pcl::PointXYZ>::Ptr aligned =

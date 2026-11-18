@@ -1,0 +1,67 @@
+{
+  "node": {
+    "id": "alg.image2d.fit_lines",
+    "name": "多目标直线拟合",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "二值前景逐轮廓直线拟合（板边/边缘线）：输出拟合线标注，方向/RMS 并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiFitLines",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "min_area",
+      "label": "最小面积",
+      "type": "number",
+      "default": 10,
+      "min": 0,
+      "max": 10000000,
+      "description": "面积过滤下限（像素²）"
+    },
+    {
+      "name": "max_area",
+      "label": "最大面积(0不限)",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 10000000,
+      "description": "面积过滤上限（≤0 不限）"
+    },
+    {
+      "name": "min_length",
+      "label": "最小跨度(0不限)",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 10000,
+      "description": "轮廓跨度过滤下限（像素；≤0 不限）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

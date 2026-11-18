@@ -243,6 +243,7 @@ public static class CppExporter
         sb.AppendLine();
         sb.AppendLine("#include <cstdio>");
         sb.AppendLine("#include <cstring>");
+        sb.AppendLine("#include <string>");
         sb.AppendLine();
 
         // ---- 有源码的 native 入口：extern "C" 直接声明（编译进可执行文件） ----
@@ -257,24 +258,7 @@ public static class CppExporter
             sb.AppendLine();
         }
 
-        // ---- 每节点：有源码 = 直调；无源码/内置 = TODO 桩；flow 控制节点 = 循环块（不生成函数） ----
-        foreach (var (node, var) in nodes)
-        {
-            var def = NodeDefs.Map[node.DefId];
-            if (node.DefId is "flow.for" or "flow.while")
-            {
-                sb.AppendLine($"// flow 控制节点 {def.Name} —— main 中生成真实 C++ 循环（作用域=下游闭包）");
-                continue;
-            }
-            sb.AppendLine($"// ==================== {def.Name}（{node.Id[..6]}）====================");
-            if (sourceNodes.TryGetValue(node.Id, out var meta))
-                EmitSourceCall(sb, node, def, var, meta, srcMap);
-            else
-                EmitBuiltinStub(sb, node, def, var);
-            sb.AppendLine();
-        }
-
-        // ---- main：按拓扑序展开；flow.for/while 节点生成真实 C++ 循环（作用域=下游闭包，嵌套自动处理） ----
+        // ---- 循环映射（先于逐节点发射：EmitSourceCall 的模板替换要引用计数变量名） ----
         var flowVars = nodes.Where(kv => kv.Node.DefId is "flow.for" or "flow.while")
                             .ToDictionary(kv => kv.Var, kv => kv.Node);
         var closureOf = new Dictionary<string, HashSet<string>>();   // flow 节点 → 下游闭包节点 Id 集
@@ -297,6 +281,40 @@ public static class CppExporter
         closureOf[kv.Node.Id] = closure;
         }
 
+        // 循环计数全局变量映射（模板 {循环名.计数} → std::to_string(g_i_<var>)）：
+        // loopIvByLabel = 显示名（Title 优先）→ 计数变量；defaultIv = 图中只有一个循环时裸 {计数} 的目标
+        var ivOfFlowNode = flowVars.ToDictionary(kv => kv.Value.Id, kv => "g_i_" + kv.Key);
+        // 同名循环取注册序最后一个（与宿主 ApplyTemplates "同名后者覆盖" 对齐）
+        var loopIvByLabel = flowVars.Values
+            .GroupBy(n => n.Title ?? NodeDefs.Map[n.DefId].Name)
+            .ToDictionary(g => g.Key, g => ivOfFlowNode[g.Last().Id]);
+        var defaultIv = flowVars.Count == 1 ? ivOfFlowNode[flowVars.Values.First().Id] : null;
+
+        // ---- 每节点：有源码 = 直调；无源码/内置 = TODO 桩；flow 控制节点 = 循环块（不生成函数） ----
+        foreach (var (node, var) in nodes)
+        {
+            var def = NodeDefs.Map[node.DefId];
+            if (node.DefId is "flow.for" or "flow.while")
+            {
+                sb.AppendLine($"// flow 控制节点 {def.Name} —— main 中生成真实 C++ 循环（作用域=下游闭包）");
+                // 计数为文件级全局：_run() 定义在 main 之外，作用域内参数模板 {循环名.计数} 才能引用到
+                sb.AppendLine($"static int g_i_{var} = 0;");
+                continue;
+            }
+            sb.AppendLine($"// ==================== {def.Name}（{node.Id[..6]}）====================");
+            if (sourceNodes.TryGetValue(node.Id, out var meta))
+            {
+                // 模板守卫（与宿主对齐）：只有每轮迭代都执行的节点（在任一循环闭包内）才解析 {..计数}——
+                // 作用域外节点宿主侧 counters=null 保留原文，导出端同样回退字面量
+                bool perIteration = flowVars.Any(kv => closureOf[kv.Value.Id].Contains(node.Id));
+                EmitSourceCall(sb, node, def, var, meta, srcMap, perIteration, loopIvByLabel, defaultIv);
+            }
+            else
+                EmitBuiltinStub(sb, node, def, var);
+            sb.AppendLine();
+        }
+
+        // ---- main：按拓扑序展开；flow.for/while 节点生成真实 C++ 循环（作用域=下游闭包，嵌套自动处理） ----
         var emittedCalls = new HashSet<string>();
         void EmitCalls(StringBuilder sb, List<(NodeInstance Node, string Var)> seq)
         {
@@ -310,10 +328,10 @@ public static class CppExporter
                     int step = loopNode.Params.TryGetValue("步长", out var tv) && tv is int t1 ? t1 : 1;
                     if (step == 0) step = 1;
                     var cmp = step > 0 ? "<" : ">";
-                    var iv = "i_" + var;
+                    var iv = "g_i_" + var;
                     var closureIds = closureOf[node.Id];
                     sb.AppendLine($"    // flow 循环：作用域 {closureIds.Count} 个节点，计数变量 {iv}");
-                    sb.AppendLine($"    for (int {iv} = {start}; {iv} {cmp} {end}; {iv} += {step}) {{");
+                    sb.AppendLine($"    for ({iv} = {start}; {iv} {cmp} {end}; {iv} += {step}) {{");
                     EmitCalls(sb, nodes.Where(p2 => closureIds.Contains(p2.Node.Id)).ToList());
                     sb.AppendLine("    }");
                 }
@@ -346,10 +364,14 @@ public static class CppExporter
         return sb.ToString();
     }
 
-    /// <summary>有源码的 native 节点：组装 AlgoCInput → 直接调用入口（编译期链接，无 DLL）。</summary>
+    /// <summary>有源码的 native 节点：组装 AlgoCInput → 直接调用入口（编译期链接，无 DLL）。
+    /// 循环模板参数：字符串参数含 {计数}/{循环名.计数} → 生成 const std::string 局部变量 + std::to_string 表达式。</summary>
     private static void EmitSourceCall(StringBuilder sb, NodeInstance node, NodeDef def, string var,
         NodeJsonRegistry.NativeSourceMeta meta,
-        Dictionary<(string Node, string Port), (string Var, NodeDef Def, string OutPort)> srcMap)
+        Dictionary<(string Node, string Port), (string Var, NodeDef Def, string OutPort)> srcMap,
+        bool perIteration,
+        IReadOnlyDictionary<string, string> loopIvByLabel,
+        string? defaultIv)
     {
         // 输出变量（文件级 static，供下游连线引用）
         for (int i = 0; i < def.Outputs.Length; i++)
@@ -365,7 +387,15 @@ public static class CppExporter
         for (int i = 0; i < paramNames.Count; i++)
         {
             var (kind, d, iv, s) = ParamLiteral(node, def.Params[i]);
-            sb.AppendLine($"    AlgoCParam p_{i} = {{{kind}, {d}, {iv}, {s}}};  // {paramNames[i]}");
+            if (perIteration && kind == "2" && TemplateToCpp(node.Params.TryGetValue(paramNames[i], out var rv) ? rv?.ToString() ?? "" : def.Params[i].Default?.ToString() ?? "",
+                                             loopIvByLabel, defaultIv) is { } expr)
+            {
+                // 循环模板：每次迭代重算——std::string 局部变量存活到函数尾，.c_str() 安全
+                sb.AppendLine($"    const std::string p_{i}_s = {expr};");
+                sb.AppendLine($"    AlgoCParam p_{i} = {{{kind}, {d}, {iv}, p_{i}_s.c_str()}};  // {paramNames[i]}（循环模板）");
+            }
+            else
+                sb.AppendLine($"    AlgoCParam p_{i} = {{{kind}, {d}, {iv}, {s}}};  // {paramNames[i]}");
         }
         if (paramNames.Count == 0) sb.AppendLine("    // 本算子无参数");
 
@@ -467,6 +497,37 @@ public static class CppExporter
             _ => ("2", "0", "0", $"\"{Escape(v?.ToString() ?? "")}\""),
         };
     }
+
+    /// <summary>参数模板正则：{...} 占位（不跨嵌套）——与 GraphExecutor 同语义。</summary>
+    private static readonly System.Text.RegularExpressions.Regex CppTplRegex =
+        new(@"\{([^{}]+)\}", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    /// <summary>字符串参数的循环模板 → C++ 拼接表达式："case_{计数}" → "case_" + std::to_string(g_i_v)。
+    /// 无占位符 / 有占位符但解析不了（多循环裸 {计数}、循环名未命中）→ 返回 null（调用方回退字面量，与宿主行为一致）。</summary>
+    private static string? TemplateToCpp(string raw, IReadOnlyDictionary<string, string> loopIvByLabel, string? defaultIv)
+    {
+        if (!raw.Contains('{')) return null;
+        var sb = new StringBuilder();
+        int pos = 0;
+        foreach (System.Text.RegularExpressions.Match m in CppTplRegex.Matches(raw))
+        {
+            var expr = m.Groups[1].Value.Trim();
+            string? iv;
+            if (expr == "计数") iv = defaultIv;
+            else if (expr.EndsWith(".计数")) loopIvByLabel.TryGetValue(expr[..^3], out iv);
+            else iv = null;
+            if (iv is null) return null;   // 有解析不了的占位符 → 整体回退字面量（不生成半吊子表达式）
+            if (m.Index > pos) AppendLit(sb, raw[pos..m.Index]);
+            if (sb.Length > 0) sb.Append(" + ");
+            sb.Append("std::to_string(").Append(iv).Append(')');
+            pos = m.Index + m.Length;
+        }
+        if (pos == 0) return null;   // 没有可解析占位符
+        if (pos < raw.Length) { if (sb.Length > 0) sb.Append(" + "); AppendLit(sb, raw[pos..]); }
+        return sb.Length == 0 ? "\"\"" : sb.ToString();
+    }
+
+    private static void AppendLit(StringBuilder sb, string s) => sb.Append('"').Append(Escape(s)).Append('"');
 
     private static string Escape(string s) => s.Replace("\\", "\\\\").Replace("\"", "\\\"");
 

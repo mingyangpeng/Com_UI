@@ -10,51 +10,63 @@
   "assembly": "Point3DAlg.dll",
   "method": "Point3DAlg_ComuiCircleFit",
   "inputs": [
-    { "name": "点云", "type": "cloud" }
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
   ],
   "params": [
     {
       "name": "z_low",
       "label": "切片高度下限(mm)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "切片高度带下限（mm；须覆盖孔壁/圆柱壁高度）"
     },
     {
       "name": "z_high",
       "label": "切片高度上限(mm)",
       "type": "number",
-      "default": 0.1
+      "default": 0.1,
+      "description": "切片高度带上限（mm）"
     },
     {
       "name": "cluster_tolerance",
       "label": "聚类连通距离(mm)",
       "type": "number",
       "default": 0.2,
-      "min": 0.01
+      "min": 0.01,
+      "description": "聚类邻域半径（mm）"
     },
     {
       "name": "min_points",
       "label": "每簇最少点数",
       "type": "int",
       "default": 20,
-      "min": 3
+      "min": 3,
+      "description": "每簇最少点数（<3 强制 3）"
     },
     {
       "name": "radius_min",
       "label": "半径下限(mm)",
       "type": "number",
       "default": 0.05,
-      "min": 0.0
+      "min": 0.0,
+      "description": "半径过滤下限（mm）"
     },
     {
       "name": "radius_max",
       "label": "半径上限(mm)",
       "type": "number",
-      "default": 50.0
+      "default": 50.0,
+      "description": "半径过滤上限（mm）"
     }
   ],
   "outputs": [
-    { "name": "孔位点云", "type": "cloud" }
+    {
+      "name": "孔位点云",
+      "type": "cloud"
+    }
   ],
   "source": {
     "files": [

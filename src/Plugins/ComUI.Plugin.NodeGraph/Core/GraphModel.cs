@@ -85,6 +85,32 @@ public sealed class NodeInstance
     public Dictionary<string, object?> Params { get; } = new();
     public NodeStatus Status { get; set; } = NodeStatus.Idle;
     public string? Error { get; set; }
+
+    /// <summary>
+    /// 循环作用域矩形（仅 flow.for/flow.while 有效）：世界坐标下的框选范围。
+    /// 框内节点（卡片左上角落入）= 循环体，每轮迭代执行；框外节点只执行一次。
+    /// null = 未框选，回退到旧的"从计数出口连线推导作用域"方式。
+    /// </summary>
+    public ScopeRect? Scope { get; set; }
+}
+
+/// <summary>循环作用域矩形（可序列化，世界坐标）。</summary>
+public sealed class ScopeRect
+{
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double W { get; set; }
+    public double H { get; set; }
+
+    /// <summary>点是否落入矩形。</summary>
+    public bool Contains(double x, double y) => x >= X && x <= X + W && y >= Y && y <= Y + H;
+}
+
+/// <summary>连线上的一个可拖拽锚点（世界坐标）。用于把线拆成多段贝塞尔，实现局部变形。</summary>
+public sealed class AnchorPoint
+{
+    public double X { get; set; }
+    public double Y { get; set; }
 }
 
 /// <summary>一条连线：从上游输出端口 → 下游输入端口。</summary>
@@ -94,6 +120,23 @@ public sealed class Connection
     public required string FromPort { get; init; }
     public required string ToNode { get; init; }
     public required string ToPort { get; init; }
+
+    /// <summary>
+    /// 反馈边：该连线在数据流图中成环（目的节点沿出边可回到来源节点）。
+    /// 拓扑排序忽略它；执行时其输入读「上一轮迭代的输出快照」（双缓冲），
+    /// 从而实现"把下游结果回灌上游、逐轮迭代"的反馈回路。
+    /// </summary>
+    public bool Feedback { get; set; }
+
+    /// <summary>源端侧贝塞尔控制点的垂直偏移（世界坐标；0=默认）。拖拽连线时可独立调整。</summary>
+    public double Bend { get; set; }
+
+    /// <summary>目标端侧贝塞尔控制点的垂直偏移（两个控制点独立，按住线的哪一段就那段跟手）。</summary>
+    public double Bend2 { get; set; }
+
+    /// <summary>曲线中间的可拖拽锚点（世界坐标，按顺序连接）。按住线某处插入锚点后，
+    /// 线在该处拆成两段、该点可独立拖动——实现真正的局部变形，端点与其它段不动。</summary>
+    public List<AnchorPoint> Anchors { get; set; } = new();
 
     public (string, string) OutKey => (FromNode, FromPort);
     public (string, string) InKey => (ToNode, ToPort);
@@ -108,8 +151,11 @@ public sealed class Connection
         /// <summary>算法文件锁定标志（随 JSON 持久化；锁定 = 只读打开，禁止修改）。</summary>
         public bool Locked { get; set; }
 
-        /// <summary>已转为算子库算子（随 JSON 持久化；宿主启动/重载时注册为「子流程」算子，保存同步写 params.json）。</summary>
+        /// <summary>已转为算子库算子（随 JSON 持久化；宿主启动/重载时注册为算子，保存同步写 params.json）。</summary>
         public bool IsOperator { get; set; }
+
+        /// <summary>转为算子后归属的算子库栏目（保存时用户选择；空=默认「子流程」）。</summary>
+        public string OperatorGroup { get; set; } = "";
 
         public event Action? Changed;
 
@@ -138,11 +184,40 @@ public sealed class Connection
 
     public void Connect(string fromNode, string fromPort, string toNode, string toPort)
     {
-        if (!IsFlowSource(fromNode))
-            DisconnectInput(toNode, toPort);   // 输入端一对一：接到已占用输入=换源；输出端允许一对多扇出
-        // 流程控制节点的连线（作用域标记）允许与数据连线共存——控制边不传数据
-        Connections.Add(new Connection { FromNode = fromNode, FromPort = fromPort, ToNode = toNode, ToPort = toPort });
+        bool flowEdge = IsFlowSource(fromNode);
+        // 成环检测：从目的节点沿「数据出边」能否回到来源节点 → 这条新线是反馈边。
+        // 反馈边不顶掉输入端口已有的种子线（种子+反馈共存：首轮用种子，之后用反馈）。
+        bool feedback = !flowEdge && WouldCreateCycle(fromNode, toNode);
+        if (!flowEdge && !feedback)
+            DisconnectInput(toNode, toPort);   // 普通输入端一对一：换源；输出端允许一对多扇出
+        // 流程控制边 / 反馈边都允许与已有连线共存
+        Connections.Add(new Connection
+        {
+            FromNode = fromNode, FromPort = fromPort, ToNode = toNode, ToPort = toPort,
+            Feedback = feedback,
+        });
         Changed?.Invoke();
+    }
+
+    /// <summary>新增 from→to 的连线是否形成数据流环：从 to 沿出边（忽略 flow 控制边）能否走到 from。</summary>
+    public bool WouldCreateCycle(string fromNode, string toNode)
+    {
+        if (fromNode == toNode) return true;
+        var visited = new HashSet<string>();
+        var queue = new Queue<string>();
+        queue.Enqueue(toNode);
+        while (queue.Count > 0)
+        {
+            var id = queue.Dequeue();
+            if (!visited.Add(id)) continue;
+            if (id == fromNode) return true;
+            foreach (var c in Connections)
+            {
+                if (c.FromNode != id || IsFlowSource(c.FromNode)) continue;
+                queue.Enqueue(c.ToNode);
+            }
+        }
+        return false;
     }
 
     public void DisconnectInput(string toNode, string toPort)
@@ -154,9 +229,13 @@ public sealed class Connection
     public Connection? FindInputConnection(string toNode, string toPort) =>
         Connections.FirstOrDefault(c => c.ToNode == toNode && c.ToPort == toPort);
 
-    /// <summary>端口的数据连线（跳过流程控制节点的作用域标记边）。</summary>
+    /// <summary>端口的数据连线（跳过流程控制节点的作用域标记边和反馈边）。</summary>
     public Connection? FindDataConnection(string toNode, string toPort) =>
-        Connections.FirstOrDefault(c => c.ToNode == toNode && c.ToPort == toPort && !IsFlowSource(c.FromNode));
+        Connections.FirstOrDefault(c => c.ToNode == toNode && c.ToPort == toPort && !IsFlowSource(c.FromNode) && !c.Feedback);
+
+    /// <summary>端口的反馈连线（上一轮输出回灌，若是首轮则无快照可读取）。</summary>
+    public Connection? FindFeedbackConnection(string toNode, string toPort) =>
+        Connections.FirstOrDefault(c => c.ToNode == toNode && c.ToPort == toPort && c.Feedback);
 
     /// <summary>断开某输出端口上的所有连线（从已连线输出端口拉线 = 拆线重连）。</summary>
     public void DisconnectOutput(string fromNode, string fromPort)
@@ -172,6 +251,7 @@ public sealed class Connection
         public string Name { get; set; } = "";
         public bool Locked { get; set; }
         public bool IsOperator { get; set; }
+        public string OperatorGroup { get; set; } = "";
         public List<PipelineNode> Nodes { get; set; } = new();
         public List<PipelineConn> Connections { get; set; } = new();
     }
@@ -184,6 +264,7 @@ public sealed class Connection
         public double X { get; set; }
         public double Y { get; set; }
         public double? Width { get; set; }
+        public ScopeRect? Scope { get; set; }
         public Dictionary<string, JsonElement>? Params { get; set; }
     }
 
@@ -193,6 +274,10 @@ public sealed class Connection
         public string FromPort { get; set; } = "";
         public string To { get; set; } = "";
         public string ToPort { get; set; } = "";
+        public bool Feedback { get; set; }
+        public double Bend { get; set; }
+        public double Bend2 { get; set; }
+        public List<AnchorPoint>? Anchors { get; set; }
     }
 
     /// <summary>整张图序列化为算法 JSON（保存到算子库"算法"栏目）。</summary>
@@ -203,15 +288,18 @@ public sealed class Connection
             Name = name,
             Locked = Locked,
             IsOperator = IsOperator,
+            OperatorGroup = OperatorGroup,
             Nodes = Nodes.Select(n => new PipelineNode
             {
-                Id = n.Id, Def = n.DefId, Title = n.Title, X = n.X, Y = n.Y, Width = n.Width,
+                Id = n.Id, Def = n.DefId, Title = n.Title, X = n.X, Y = n.Y, Width = n.Width, Scope = n.Scope,
                 Params = new Dictionary<string, JsonElement>(
                     n.Params.Select(kv => new KeyValuePair<string, JsonElement>(kv.Key, JsonValueOf(kv.Value)))),
             }).ToList(),
             Connections = Connections.Select(c => new PipelineConn
             {
                 From = c.FromNode, FromPort = c.FromPort, To = c.ToNode, ToPort = c.ToPort,
+                Feedback = c.Feedback, Bend = c.Bend, Bend2 = c.Bend2,
+                Anchors = c.Anchors.Count > 0 ? c.Anchors.Select(a => new AnchorPoint { X = a.X, Y = a.Y }).ToList() : null,
             }).ToList(),
         };
         return JsonSerializer.Serialize(doc, new JsonSerializerOptions { WriteIndented = true });
@@ -239,6 +327,7 @@ public sealed class Connection
         Connections.Clear();
         Locked = doc.Locked;
         IsOperator = doc.IsOperator;
+        OperatorGroup = doc.OperatorGroup ?? "";
 
         // 节点 Id 保留保存文件里的原值（子流程参数键锚定节点 Id，跨加载/改名稳定）；
         // 文件里 Id 为空或重复（手改损坏）→ 发新 Id 兜底，防 byId 字典构建炸键冲突
@@ -250,7 +339,7 @@ public sealed class Connection
             var id = !string.IsNullOrWhiteSpace(n.Id) && usedIds.Add(n.Id)
                 ? n.Id
                 : Guid.NewGuid().ToString("N")[..8];
-            var inst = new NodeInstance { Id = id, DefId = n.Def, X = n.X, Y = n.Y, Title = n.Title, Width = n.Width };
+            var inst = new NodeInstance { Id = id, DefId = n.Def, X = n.X, Y = n.Y, Title = n.Title, Width = n.Width, Scope = n.Scope };
             if (n.Params is not null)
                 foreach (var kv in n.Params)
                     inst.Params[kv.Key] = JsonToObject(kv.Value);
@@ -260,7 +349,16 @@ public sealed class Connection
         foreach (var c in doc.Connections)
         {
             if (idMap.TryGetValue(c.From, out var from) && idMap.TryGetValue(c.To, out var to))
-                Connections.Add(new Connection { FromNode = from.Id, FromPort = c.FromPort, ToNode = to.Id, ToPort = c.ToPort });
+                Connections.Add(new Connection
+                {
+                    FromNode = from.Id, FromPort = c.FromPort, ToNode = to.Id, ToPort = c.ToPort,
+                    Feedback = c.Feedback,
+                    Bend = c.Bend,
+                    Bend2 = c.Bend2,
+                    Anchors = c.Anchors is { Count: > 0 }
+                        ? c.Anchors.Select(a => new AnchorPoint { X = a.X, Y = a.Y }).ToList()
+                        : new List<AnchorPoint>(),
+                });
         }
         Changed?.Invoke();
     }
@@ -333,7 +431,16 @@ public sealed class Connection
         foreach (var c in doc.Connections)
         {
             if (idMap.TryGetValue(c.From, out var from) && idMap.TryGetValue(c.To, out var to))
-                Connections.Add(new Connection { FromNode = from, FromPort = c.FromPort, ToNode = to, ToPort = c.ToPort });
+                Connections.Add(new Connection
+                {
+                    FromNode = from, FromPort = c.FromPort, ToNode = to, ToPort = c.ToPort,
+                    Feedback = c.Feedback,
+                    Bend = c.Bend,
+                    Bend2 = c.Bend2,
+                    Anchors = c.Anchors is { Count: > 0 }
+                        ? c.Anchors.Select(a => new AnchorPoint { X = a.X, Y = a.Y }).ToList()
+                        : new List<AnchorPoint>(),
+                });
         }
         Changed?.Invoke();
     }

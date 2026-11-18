@@ -1,0 +1,25 @@
+{
+  "Name": "\u6211\u7684\u7B97\u6CD5",
+  "Locked": false,
+  "IsOperator": false,
+  "OperatorGroup": "",
+  "Nodes": [
+    {
+      "Id": "53333a72",
+      "Def": "sub.show1.pipeline",
+      "Title": null,
+      "X": 340,
+      "Y": 158,
+      "Width": 260,
+      "Params": {
+        "\u6A21\u7CCA\u964D\u566A.method": 0,
+        "\u6A21\u7CCA\u964D\u566A.ksize": 9,
+        "\u6A21\u7CCA\u964D\u566A.sigma1": 50,
+        "\u6A21\u7CCA\u964D\u566A.sigma2": 100,
+        "Canny \u8FB9\u7F18.threshold1": 2,
+        "Canny \u8FB9\u7F18.threshold2": 30
+      }
+    }
+  ],
+  "Connections": []
+}

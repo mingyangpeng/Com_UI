@@ -22,7 +22,8 @@
       "type": "int",
       "default": 0,
       "min": 0,
-      "max": 4
+      "max": 4,
+      "description": "0 固定二值 / 1 反二值 / 2 OTSU / 3 自适应均值 / 4 自适应高斯"
     },
     {
       "name": "thresh",
@@ -30,7 +31,8 @@
       "type": "number",
       "default": 128,
       "min": 0,
-      "max": 255
+      "max": 255,
+      "description": "固定阈值（仅 mode 0/1 有效）"
     },
     {
       "name": "maxval",
@@ -38,7 +40,8 @@
       "type": "number",
       "default": 255,
       "min": 0,
-      "max": 255
+      "max": 255,
+      "description": "前景赋值灰度"
     },
     {
       "name": "block_size",
@@ -46,7 +49,8 @@
       "type": "int",
       "default": 3,
       "min": 3,
-      "max": 51
+      "max": 51,
+      "description": "自适应窗口边长（偶数自动补奇；仅 mode 3/4 有效）"
     },
     {
       "name": "c",
@@ -54,7 +58,8 @@
       "type": "number",
       "default": 0,
       "min": -100,
-      "max": 100
+      "max": 100,
+      "description": "自适应偏移常数（仅 mode 3/4 有效）"
     }
   ],
   "outputs": [

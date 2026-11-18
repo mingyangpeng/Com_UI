@@ -4,7 +4,7 @@
     "name": "批板差分",
     "group": "2D 图像",
     "category": "处理",
-    "description": "基准板与待检板逐像素差的绝对值（检出差异区域）"
+    "description": "基准板与待检板逐像素差的绝对值（尺寸/通道须一致）——再接阈值化节点即缺陷检出链"
   },
   "runtime": "native",
   "assembly": "Image2DAlg.dll",

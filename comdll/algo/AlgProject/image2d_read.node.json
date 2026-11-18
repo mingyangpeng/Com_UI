@@ -15,7 +15,8 @@
       "name": "img_path",
       "label": "图像路径",
       "type": "path",
-      "default": ""
+      "default": "",
+      "description": "图像文件路径（png/tiff/jpg/jpeg，ANSI 编码）；错误码 1=未设置路径、2=读取失败"
     }
   ],
   "outputs": [
@@ -30,13 +31,11 @@
       "integration/comui/comui_native_abi.h",
       "src/AlgExport.h",
       "src/Image2DAlg/Image2DAlg_api.cpp",
-      "src/Image2DAlg/Image2DAlg_Ops.cpp",
       "src/Image2DAlg/include/Image2DAlg_api.h"
     ],
     "includes": [
       "src",
-      "src/Image2DAlg/include",
-      "src/ShapelyAlg"
+      "src/Image2DAlg/include"
     ]
   }
 }

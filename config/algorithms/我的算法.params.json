@@ -1,0 +1,12 @@
+{
+  "isOperator": false,
+  "group": "",
+  "params": {
+    "show1.pipeline.模糊降噪.method": 0,
+    "show1.pipeline.模糊降噪.ksize": 9,
+    "show1.pipeline.模糊降噪.sigma1": 50,
+    "show1.pipeline.模糊降噪.sigma2": 100,
+    "show1.pipeline.Canny 边缘.threshold1": 2,
+    "show1.pipeline.Canny 边缘.threshold2": 30
+  }
+}

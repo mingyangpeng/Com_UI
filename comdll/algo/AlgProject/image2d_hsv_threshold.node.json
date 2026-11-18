@@ -22,7 +22,8 @@
       "type": "number",
       "default": 0,
       "min": 0,
-      "max": 180
+      "max": 180,
+      "description": "色调下限 [0,180]（红色跨 0 需两节点取并集）"
     },
     {
       "name": "h_hi",
@@ -30,7 +31,8 @@
       "type": "number",
       "default": 180,
       "min": 0,
-      "max": 180
+      "max": 180,
+      "description": "色调上限 [0,180]"
     },
     {
       "name": "s_lo",
@@ -38,7 +40,8 @@
       "type": "number",
       "default": 0,
       "min": 0,
-      "max": 255
+      "max": 255,
+      "description": "饱和度下限 [0,255]"
     },
     {
       "name": "s_hi",
@@ -46,7 +49,8 @@
       "type": "number",
       "default": 255,
       "min": 0,
-      "max": 255
+      "max": 255,
+      "description": "饱和度上限 [0,255]"
     },
     {
       "name": "v_lo",
@@ -54,7 +58,8 @@
       "type": "number",
       "default": 0,
       "min": 0,
-      "max": 255
+      "max": 255,
+      "description": "明度下限 [0,255]"
     },
     {
       "name": "v_hi",
@@ -62,7 +67,8 @@
       "type": "number",
       "default": 255,
       "min": 0,
-      "max": 255
+      "max": 255,
+      "description": "明度上限 [0,255]"
     }
   ],
   "outputs": [

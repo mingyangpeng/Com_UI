@@ -28,6 +28,10 @@
 //            FindAllMatchesROI——结果坐标平移回全图系，同 CCROI 先例）
 //   1.13.0 + MatchTemplatePyramid（金字塔粗搜 + 逐级精化的对位提速版）
 //   1.14.0 + RegionStats / Histogram / CompareHist（批次灰度一致性监控）
+//   1.15.0 + Binarize（统一二值化：单阈值[含 TRUNC/TOZERO]/OTSU/自适应/双阈值 + 反转）
+//   2.0.0  + 特征点族（HarrisCorners / GoodFeatures / CornerSubPix）+
+//            ORBAlign（ORB 特征匹配 + RANSAC 仿射对位——大形变对位）+
+//            ApproxPolyDP（多边形拟合）/ FitRectsFromBinary（多目标旋转矩形）
 //
 // 【通道语义】Image2DAlg_Image.channels 支持 1（灰度）/ 3（BGR）/ 4（BGRA），
 //   data 为紧排像素（行步长 = width * channels，无对齐填充）：
@@ -130,6 +134,34 @@ IMAGE2DALG_EXPORT int Image2DAlg_Threshold(const Image2DAlg_Image* in, int mode,
                                            double thresh, double maxval,
                                            int block_size, double C,
                                            Image2DAlg_Image* out);
+
+/// 统一二值化（输出 1 通道）。相比 Threshold：补全 TRUNC/TOZERO、双阈值，且统一支持反转。
+/// 与 Threshold 的关系：本接口独立新增，不改变旧接口行为；mode 0~4 与 Threshold 语义一致。
+/// [in] mode
+///   0 固定二值      v >= thresh  -> maxval，否则 0
+///   1 固定反二值    v >= thresh  -> 0，否则 maxval
+///   2 OTSU 自动阈值（双峰直方图；thresh 忽略）
+///   3 自适应均值    光照不均场景（block_size/C 有效）
+///   4 自适应高斯    光照不均场景（block_size/C 有效）
+///   5 TRUNC 截断    v > thresh -> thresh，否则 v（保留灰度层次）
+///   6 TOZERO        v > thresh -> 0，否则 v
+///   7 TOZERO_INV    v > thresh -> v，否则 0
+///   8 双阈值·区间内前景  low <= v <= high -> maxval，否则 0（高亮带提取 / 背景抑制）
+///   9 双阈值·区间外前景  v < low 或 v > high -> maxval，否则 0（暗/亮异常同时标记）
+///  10 双阈值·三值化      v < low -> 0；low <= v <= high -> mid_val；v > high -> maxval
+/// [in] thresh     固定阈值（mode 0/1/5/6/7 有效；mode 8/9/10 作为下限 low）
+/// [in] thresh2    双阈值上限 high（mode 8/9/10 有效；须 >= thresh，否则 -3）
+/// [in] maxval     前景赋值（常用 255；mode 10 为高值端；钳制到 [0,255]）
+/// [in] mid_val    三值化中间值（仅 mode 10 有效；钳制到 [0,255]）
+/// [in] block_size 自适应窗口边长（mode 3/4 有效；偶数自动补奇，最小 3）
+/// [in] C          自适应偏移常数（mode 3/4 有效）
+/// [in] invert     0 不反转；非 0 对最终结果逐像素取反（v -> 255 - v），对所有 mode 生效
+/// 彩色输入内部先转灰度（保持 ToGray 现有方法不变）。输出 1 通道。
+IMAGE2DALG_EXPORT int Image2DAlg_Binarize(const Image2DAlg_Image* in, int mode,
+                                          double thresh, double thresh2,
+                                          double maxval, double mid_val,
+                                          int block_size, double C, int invert,
+                                          Image2DAlg_Image* out);
 
 /// 模糊 / 降噪（输出通道与输入一致）。
 /// [in]  method   0 高斯 / 1 中值 / 2 双边
@@ -350,6 +382,7 @@ IMAGE2DALG_EXPORT int Image2DAlg_FindAllMatches(const Image2DAlg_Image* image,
                                                 int nms_radius,
                                                 Image2DAlg_Match** out_matches, int* out_count);
 
+/// 释放匹配结果数组（直接 free 指针本身；NULL 安全；调用方自行置空）。
 IMAGE2DALG_EXPORT void Image2DAlg_FreeMatches(Image2DAlg_Match* matches);
 
 /// 模板匹配（ROI 版）：仅在 ROI 内匹配，命中左上角平移回全图坐标系。
@@ -441,6 +474,7 @@ IMAGE2DALG_EXPORT int Image2DAlg_FindAllMatchesEx(const Image2DAlg_Image* image,
                                                   Image2DAlg_MatchEx** out_matches,
                                                   int* out_count);
 
+/// 释放扩展匹配结果数组（直接 free 指针本身；NULL 安全；调用方自行置空）。
 IMAGE2DALG_EXPORT void Image2DAlg_FreeMatchesEx(Image2DAlg_MatchEx* matches);
 
 /// HSV 色彩阈值分割（输出 1 通道 0/255 掩膜）。
@@ -626,7 +660,10 @@ IMAGE2DALG_EXPORT int Image2DAlg_HoughCirclesROI(const Image2DAlg_Image* in,
                                                  Image2DAlg_HoughCircle** out_circles,
                                                  int* out_count);
 
+/// 释放霍夫线段数组（直接 free 指针本身；NULL 安全；调用方自行置空）。
 IMAGE2DALG_EXPORT void Image2DAlg_FreeLines(Image2DAlg_Line4* lines);
+
+/// 释放霍夫圆数组（直接 free 指针本身；NULL 安全；调用方自行置空）。
 IMAGE2DALG_EXPORT void Image2DAlg_FreeCirclesHough(Image2DAlg_HoughCircle* circles);
 
 // ---------------- 区域统计（封装 ImageProcessor 17/22 节，批次一致性监控） ----------------
@@ -734,6 +771,117 @@ IMAGE2DALG_EXPORT int Image2DAlg_WarpPerspective(const Image2DAlg_Image* in,
                                                  int out_width, int out_height,
                                                  int interpolation,
                                                  Image2DAlg_Image* out);
+
+// ---------------- 特征点查找（Mark 点自动定位 / 大形变对位前置） ----------------
+
+/// 二维浮点点集容器（角点/特征点/多边形顶点）。
+typedef struct Image2DAlg_Point2f {
+    float x, y;
+} Image2DAlg_Point2f;
+
+/// 释放点集数组（直接 free 指针本身；NULL 安全；调用方自行置空）。
+IMAGE2DALG_EXPORT void Image2DAlg_FreePoint2f(Image2DAlg_Point2f* pts);
+
+/// Harris 角点检测（响应阈值取相对最大响应的比例，3x3 邻域 NMS 去重）。
+/// [in]  block_size   邻域窗口边长（奇数，>= 3，典型 5）
+/// [in]  ksize        Sobel 求导核边长（奇数，>= 3，典型 3）
+/// [in]  k            Harris 常数（典型 0.04~0.06）
+/// [in]  thresh_ratio 响应阈值比例 [0,1]：仅保留响应 >= ratio*最大响应 的角点
+///                    （0 = 保留全部局部极大值；典型 0.01~0.1）
+/// [in]  subpix       != 0 做角点亚像素细化（±0.5px，需图内有梯度结构）
+/// [out] out_points   malloc 数组（用 FreePoint2f 释放）；
+///                    无检出时 *out_points = NULL、*out_count = 0、仍返回 0
+///                    （纯平坦图无梯度结构无检出属正常）。彩色输入先转灰度。
+IMAGE2DALG_EXPORT int Image2DAlg_HarrisCorners(const Image2DAlg_Image* in,
+                                               int block_size, int ksize, double k,
+                                               double thresh_ratio, int subpix,
+                                               Image2DAlg_Point2f** out_points, int* out_count);
+
+/// Shi-Tomasi 角点（goodFeaturesToTrack）：按质量降序、内置最小间距 NMS。
+/// [in]  max_corners    最大角点数（>= 1，否则 -3）
+/// [in]  quality_level  质量系数 (0,1]：相对最强角点响应的比例（典型 0.01~0.1）
+/// [in]  min_distance   角点最小间距（像素，>= 1）
+/// [in]  subpix         同 HarrisCorners
+IMAGE2DALG_EXPORT int Image2DAlg_GoodFeatures(const Image2DAlg_Image* in, int max_corners,
+                                              double quality_level, double min_distance,
+                                              int subpix,
+                                              Image2DAlg_Point2f** out_points, int* out_count);
+
+/// 角点亚像素细化（梯度法，需初始角点附近有梯度结构）。
+/// [in]  pts/count   初始角点（如 HarrisCorners/GoodFeatures 的输出）
+/// [in]  win_size    搜索窗口边长（奇数，>= 3，典型 5~11）
+/// [out] out_points  malloc 数组（用 FreePoint2f 释放），细化失败的位置保持原值
+IMAGE2DALG_EXPORT int Image2DAlg_CornerSubPix(const Image2DAlg_Image* in,
+                                              const Image2DAlg_Point2f* pts, int count,
+                                              int win_size, Image2DAlg_Point2f** out_points);
+
+// ---------------- 多边形拟合（形状判定基础） ----------------
+
+/// 轮廓顶点逼近（Douglas-Peucker，epsilon 为像素容差）：矩形/多边形形状判定——
+/// epsilon 内删冗余顶点（矩形轮廓 → 4 角点）。
+/// [in]  xy/count   轮廓点（count >= 3，否则 -3）
+/// [in]  epsilon    逼近容差（像素；0 = 仅去除共线冗余）
+/// [in]  closed     != 0 = 闭合轮廓（findContours 输出）
+/// [out] out_xy     malloc 扁平点集 [x0,y0,...]（用 FreeContourPoints 释放）
+/// [out] out_count  逼近后顶点个数
+IMAGE2DALG_EXPORT int Image2DAlg_ApproxPolyDP(const float* xy, int count, double epsilon,
+                                              int closed, float** out_xy, int* out_count);
+
+/// 多目标旋转矩形拟合（异形件 / 料口测量）：二值前景逐外轮廓 minAreaRect。
+/// [in]  in          二值语义：非零像素为前景
+/// [in]  min/max_area 面积过滤（同 ConnectedComponents）
+/// [out] out_rects   malloc 数组（用 FreeRectFits 释放）；无结果时 NULL/0/返回 0
+IMAGE2DALG_EXPORT int Image2DAlg_FitRectsFromBinary(const Image2DAlg_Image* in,
+                                                    int min_area, int max_area,
+                                                    Image2DAlg_RectFit** out_rects,
+                                                    int* out_count);
+
+IMAGE2DALG_EXPORT void Image2DAlg_FreeRectFits(Image2DAlg_RectFit* rects);
+
+/// 多目标直线拟合（板边 / 边缘线测量）：二值前景逐外轮廓做 DIST_L2 直线拟合。
+/// [in]  in          二值语义：非零像素为前景（彩色先转灰度）
+/// [in]  min/max_area 面积过滤（同 ConnectedComponents）
+/// [in]  min_length   直线覆盖跨度过滤（像素：轮廓点在方向上的投影跨度；
+///                    <= 0 表示不设下限）
+/// [out] out_lines    malloc 数组（用 FreeLineFits 释放）；无结果时 NULL/0/返回 0
+/// [out] LineFit.rms  点到直线垂直距离的 RMS（直线度指标）
+IMAGE2DALG_EXPORT int Image2DAlg_FitLinesFromBinary(const Image2DAlg_Image* in,
+                                                    int min_area, int max_area,
+                                                    double min_length,
+                                                    Image2DAlg_LineFit** out_lines,
+                                                    int* out_count);
+
+IMAGE2DALG_EXPORT void Image2DAlg_FreeLineFits(Image2DAlg_LineFit* lines);
+
+
+// ---------------- 特征匹配对位（ORB，大形变场景） ----------------
+
+/// ORB 特征对位：特征点查找 + 描述子匹配（Hamming + Lowe 比率测试）+
+/// RANSAC 仿射估计——弥补模板匹配（只适合小形变），旋转/尺度/亮度变化鲁棒。
+/// [in]  in1/in2       两张灰度语义图（彩色先转灰度）
+/// [in]  n_features    ORB 特征点上限（典型 500，<= 0 → -3）
+/// [in]  ratio         Lowe 比率测试系数（典型 0.7~0.8；(0,1) 越界 → -3）
+/// [out] m             仿射 2x3 行主序（in1 → in2，RANSAC 内点最小二乘）
+/// [out] out_matches   malloc 匹配点对数组（用 FreeOrbMatches 释放）：
+///                     x1/y1 = 图1 特征点，x2/y2 = 图2 对应点，distance = Hamming
+/// [out] out_count     比率测试后匹配对数
+/// [out] out_inliers   RANSAC 内点数（仿射质量指标：>= 10 视为可靠）
+/// 返回：0 成功；-2 特征/匹配不足（< 3 对或无法求解仿射——平坦图属正常）；
+///       其余错误码同全局约定。
+typedef struct Image2DAlg_OrbMatch {
+    double x1, y1;    // 图1 特征点
+    double x2, y2;    // 图2 对应特征点
+    double distance;  // 描述子 Hamming 距离（越小越相似）
+} Image2DAlg_OrbMatch;
+
+IMAGE2DALG_EXPORT int Image2DAlg_ORBAlign(const Image2DAlg_Image* in1,
+                                          const Image2DAlg_Image* in2,
+                                          int n_features, double ratio,
+                                          double m[6],
+                                          Image2DAlg_OrbMatch** out_matches, int* out_count,
+                                          int* out_inliers);
+
+IMAGE2DALG_EXPORT void Image2DAlg_FreeOrbMatches(Image2DAlg_OrbMatch* matches);
 
 #ifdef __cplusplus
 }

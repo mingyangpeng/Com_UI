@@ -19,7 +19,7 @@
 #include <string>
 #include <vector>
 
-// ---------------- 配准策略（键盘 1..6 直接映射） ----------------
+// ---------------- 配准策略（键盘 1..7 直接映射） ----------------
 enum Point3DAlg_RegistStrategy {
     POINT3DALG_REGIST_ICP_P2P    = 1,   // ICP 点到点：通用，最稳
     POINT3DALG_REGIST_ICP_P2PL   = 2,   // ICP 点到面：平面多时快且准，需法线
@@ -27,6 +27,8 @@ enum Point3DAlg_RegistStrategy {
     POINT3DALG_REGIST_FPFH_RANSAC= 4,   // FPFH + RANSAC：无需初值，慢
     POINT3DALG_REGIST_NDT        = 5,   // NDT：大初始偏差稳健
     POINT3DALG_REGIST_PCA        = 6,   // PCA 主轴粗配准：极快，给 ICP 找初值
+    POINT3DALG_REGIST_MULTISCALE = 7,   // 多尺度 ICP（Open3D multiscale_icp）：voxel 金字塔
+                                        //   粗→细逐级配准，大初值偏差下比单级 ICP 稳
 };
 
 // 策略名（日志/标题栏显示）
@@ -43,8 +45,8 @@ struct POINT3DALG_EXPORT Point3DAlg_RegistSession {
     Point3DAlg_RegistSession();  // 单位阵 / 策略1 / fitness=-1
 };
 
-// 单次操作结果
-struct Point3DAlg_RegistStep {
+// 单次操作结果（全部纯函数的返回类型，跨 DLL 使用）
+struct POINT3DALG_EXPORT Point3DAlg_RegistStep {
     Point3DAlg_RegistSession next;   // 新状态
     double fitness;                  // 本次 fitness（0~1，越大越好；<0 表示无效）
     double inlier_rmse;              // 局内点均方根误差（单位同点云，通常 mm）

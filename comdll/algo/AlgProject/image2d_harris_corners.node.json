@@ -1,0 +1,85 @@
+{
+  "node": {
+    "id": "alg.image2d.harris_corners",
+    "name": "Harris 角点",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "Harris 角点检测（Mark 点自动定位）：输出角点十字标注，坐标并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiHarrisCorners",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "block_size",
+      "label": "邻域窗口",
+      "type": "int",
+      "default": 5,
+      "min": 3,
+      "max": 51,
+      "description": "角点检测邻域窗口（奇数自动补）"
+    },
+    {
+      "name": "ksize",
+      "label": "Sobel核",
+      "type": "int",
+      "default": 3,
+      "min": 3,
+      "max": 7,
+      "description": "Sobel 梯度核边长（3~7）"
+    },
+    {
+      "name": "k",
+      "label": "Harris常数",
+      "type": "number",
+      "default": 0.04,
+      "min": 0.01,
+      "max": 0.1,
+      "description": "Harris 响应常数（经验 0.04~0.06）"
+    },
+    {
+      "name": "thresh_ratio",
+      "label": "响应阈值比例",
+      "type": "number",
+      "default": 0.05,
+      "min": 0,
+      "max": 1,
+      "description": "响应阈值比例（相对最大响应，越小角点越多）"
+    },
+    {
+      "name": "subpix",
+      "label": "亚像素细化",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "1=角点亚像素细化"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

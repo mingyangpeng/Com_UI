@@ -22,7 +22,8 @@
       "type": "int",
       "default": 0,
       "min": 0,
-      "max": 100000
+      "max": 100000,
+      "description": "左上角 X"
     },
     {
       "name": "y",
@@ -30,7 +31,8 @@
       "type": "int",
       "default": 0,
       "min": 0,
-      "max": 100000
+      "max": 100000,
+      "description": "左上角 Y"
     },
     {
       "name": "width",
@@ -38,7 +40,8 @@
       "type": "int",
       "default": 100,
       "min": 1,
-      "max": 100000
+      "max": 100000,
+      "description": "宽（越界自动钳制到图内）"
     },
     {
       "name": "height",
@@ -46,7 +49,8 @@
       "type": "int",
       "default": 100,
       "min": 1,
-      "max": 100000
+      "max": 100000,
+      "description": "高（越界自动钳制到图内）"
     }
   ],
   "outputs": [

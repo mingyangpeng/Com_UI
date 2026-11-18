@@ -32,16 +32,50 @@ public static class GraphExecutor
             var loopNodes = graph.Nodes.Where(n => n.DefId is "flow.for" or "flow.while").ToList();
             if (loopNodes.Count > 0)
             {
-                // 作用域闭包：从循环节点沿出边可达的全部节点（含循环节点自身）
-                var scope = new HashSet<string>(loopNodes.Select(n => n.Id));
-                var queue = new Queue<string>(loopNodes.Select(n => n.Id));
-                while (queue.Count > 0)
+                // 作用域计算（两种模式）：
+                // A) 循环节点有 Scope 矩形（画布右击框选设置）→ 卡片左上角落入框内的节点 = 作用域；
+                // B) 无矩形（旧图/未框选）→ 回退到"从计数出口沿出边可达"的闭包方式。
+                // 多个循环节点都有矩形时，取并集（各自计数独立注入，落在框内的节点每轮都执行）。
+                var scopedNodes = loopNodes.Where(n => n.Scope is not null).ToList();
+                HashSet<string> scope;
+                if (scopedNodes.Count > 0)
                 {
-                    var id = queue.Dequeue();
-                    foreach (var c in graph.Connections.Where(c => c.FromNode == id))
+                    scope = new HashSet<string>();
+                    foreach (var loop in scopedNodes)
                     {
-                        if (byId.ContainsKey(c.ToNode) && scope.Add(c.ToNode))
-                            queue.Enqueue(c.ToNode);
+                        var r = loop.Scope!;
+                        scope.Add(loop.Id);
+                        foreach (var n in graph.Nodes)   // 卡片左上角落入矩形 = 在作用域内
+                            if (r.Contains(n.X, n.Y)) scope.Add(n.Id);
+                    }
+                    // 混合模式：无矩形的循环节点仍按连线闭包并入——否则其下游不在作用域内只执行一次
+                    foreach (var loop in loopNodes.Where(n => n.Scope is null))
+                    {
+                        scope.Add(loop.Id);
+                        var q2 = new Queue<string>();
+                        q2.Enqueue(loop.Id);
+                        while (q2.Count > 0)
+                        {
+                            var cur = q2.Dequeue();
+                            foreach (var c in graph.Connections.Where(c => c.FromNode == cur))
+                                if (byId.ContainsKey(c.ToNode) && scope.Add(c.ToNode)) q2.Enqueue(c.ToNode);
+                        }
+                    }
+                    log($"[循环] 框选作用域（{scope.Count} 个节点）");
+                }
+                else
+                {
+                    // 旧方式：从循环节点沿出边可达的全部节点（含循环节点自身）
+                    scope = new HashSet<string>(loopNodes.Select(n => n.Id));
+                    var queue = new Queue<string>(loopNodes.Select(n => n.Id));
+                    while (queue.Count > 0)
+                    {
+                        var id = queue.Dequeue();
+                        foreach (var c in graph.Connections.Where(c => c.FromNode == id))
+                        {
+                            if (byId.ContainsKey(c.ToNode) && scope.Add(c.ToNode))
+                                queue.Enqueue(c.ToNode);
+                        }
                     }
                 }
 
@@ -52,6 +86,12 @@ public static class GraphExecutor
 
                 // 先行：作用域外节点按拓扑序执行一次（输出保留，供作用域内每轮迭代消费）
                 RunPass(graph, outScope, byId, outputs, setStatus, log, ct, null);
+
+                // 反馈边双缓冲：prevOutputs = 上一轮迭代的输出快照。
+                // 反馈输入读它（首轮为空 → 回退到种子线），每轮结束刷新。
+                var prevOutputs = new Dictionary<(string Node, string Port), object?>();
+                bool hasFeedback = graph.Connections.Any(c => c.Feedback);
+                if (hasFeedback) log("[循环] 检测到反馈边：输入读上一轮输出（首轮用种子线）");
 
                 // 多个循环节点：各自按自身参数算序列，迭代次数取最大者（短序列钳位在末值）
                 var nodeSeqs = loopNodes.ToDictionary(n => n.Id, IterationSequence);
@@ -69,7 +109,15 @@ public static class GraphExecutor
                         counters[n.Id] = val;   // 模板 {循环名.计数} / {计数} 的替换源
                     }
                     log($"[循环] 第 {it + 1}/{total} 次迭代：计数 = {passPresets.First().Value}");
-                    RunPass(graph, inScope, byId, outputs, setStatus, log, ct, passPresets, counters);
+                    RunPass(graph, inScope, byId, outputs, setStatus, log, ct, passPresets, counters, prevOutputs);
+
+                    // 本轮结束：把作用域内输出刷入快照，供下一轮的反馈输入读取
+                    if (hasFeedback)
+                    {
+                        prevOutputs.Clear();
+                        foreach (var kv in outputs)
+                            if (inScope.Contains(kv.Key.Node)) prevOutputs[kv.Key] = kv.Value;
+                    }
                 }
 
                 if (collectOutputs is not null)
@@ -167,6 +215,7 @@ public static class GraphExecutor
         foreach (var c in graph.Connections)
         {
             if (!byId.ContainsKey(c.FromNode) || !byId.ContainsKey(c.ToNode)) continue;
+            if (c.Feedback) continue;   // 反馈边不参与拓扑（读上一轮快照，非本轮数据依赖）
             inDegree[c.ToNode]++;
             adjacency[c.FromNode].Add(c.ToNode);
         }
@@ -189,7 +238,10 @@ public static class GraphExecutor
         return (order, byId);
     }
 
-    /// <summary>单次拓扑序执行（presets = 预置输出：循环计数注入 / 子流程输入绑定；counters = 循环计数器（节点Id→值），供参数模板 {循环名.计数} 迭代期替换）。</summary>
+    /// <summary>
+    /// 单次拓扑序执行（presets = 预置输出：循环计数注入 / 子流程输入绑定；counters = 循环计数器，供参数模板替换；
+    /// prevOutputs = 上一轮迭代的输出快照，供反馈边读取）。
+    /// </summary>
     private static void RunPass(
         GraphDocument graph,
         List<string> ids,
@@ -199,7 +251,8 @@ public static class GraphExecutor
         Action<string> log,
         CancellationToken ct,
         IReadOnlyDictionary<(string Node, string Port), object?>? presets,
-        IReadOnlyDictionary<string, int>? counters = null)
+        IReadOnlyDictionary<string, int>? counters = null,
+        IReadOnlyDictionary<(string Node, string Port), object?>? prevOutputs = null)
     {
         // ===== 依序执行（outputs 跨 pass 共享：作用域外节点的输出供每轮迭代消费） =====
         // 未连线/上游被跳过的节点 = 跳过（灰态+日志），不中止整图——
@@ -227,8 +280,11 @@ public static class GraphExecutor
                 continue;
             }
 
-                // 输入端口未连线，或上游节点被跳过（无产出）→ 本节点跳过，下游级联跳过
-                var missingInput = def.Inputs.FirstOrDefault(p => graph.FindInputConnection(node.Id, p.Name) is null);
+                // 输入端口未连线，或上游节点被跳过（无产出）→ 本节点跳过，下游级联跳过。
+                // 例外：预置输入端口（子流程入口绑定，键=输入端口名）视为已连线
+                var missingInput = def.Inputs.FirstOrDefault(p =>
+                    graph.FindInputConnection(node.Id, p.Name) is null &&
+                    presets?.ContainsKey((node.Id, p.Name)) != true);
                 if (missingInput is not null)
                 {
                     skipped.Add(id);
@@ -237,8 +293,8 @@ public static class GraphExecutor
                     continue;
                 }
                 var skippedUpstream = def.Inputs
-                    .Select(p => graph.FindInputConnection(node.Id, p.Name)!)
-                    .Any(c => skipped.Contains(c.FromNode));
+                    .Select(p => graph.FindInputConnection(node.Id, p.Name))
+                    .Any(c => c is not null && skipped.Contains(c.FromNode));   // 预置输入端口无连线 → null 要跳过
                 if (skippedUpstream)
                 {
                     skipped.Add(id);
@@ -267,18 +323,44 @@ public static class GraphExecutor
                     var noOutput = false;
                     foreach (var port in def.Inputs)
                     {
-                        // 该端口上的连线：数据连线（非 flow 来源）优先；flow 连线 = 作用域标记（不传数据）
-                        var conns = graph.Connections.Where(c => c.ToNode == node.Id && c.ToPort == port.Name).ToList();
-                        var dataConn = conns.FirstOrDefault(c => !GraphDocument.IsFlowSource(c.FromNode));
-                        if (dataConn is null)
+                        // 子流程输入绑定：入口节点的输入端口由父图预置（键=输入端口名）——优先于连线查找
+                        if (presets is not null && presets.TryGetValue((node.Id, port.Name), out var presetVal) && presetVal is not null)
                         {
-                            if (conns.Count == 0) { noOutput = true; break; }   // 端口未连线
-                            continue;   // 仅作用域标记边 → 控制端口，跳过不取数据
+                            inputs[port.Name] = presetVal;
+                            continue;
                         }
-                        if (!outputs.TryGetValue((dataConn.FromNode, dataConn.FromPort), out var value) || value is null)
+                        // 该端口上的连线：flow 来源 = 作用域标记（不传数据）；普通数据边 = 种子；反馈边 = 上一轮输出
+                        var conns = graph.Connections.Where(c => c.ToNode == node.Id && c.ToPort == port.Name).ToList();
+                        var dataConn = graph.FindDataConnection(node.Id, port.Name);   // 普通种子边（已排除 flow 与反馈）
+                        var feedbackConn = graph.FindFeedbackConnection(node.Id, port.Name);
+
+                        object? value = null;
+                        bool gotValue = false;
+
+                        // 反馈边优先：有上一轮快照就用它（迭代反馈语义）
+                        if (feedbackConn is not null && prevOutputs is not null &&
+                            prevOutputs.TryGetValue((feedbackConn.FromNode, feedbackConn.FromPort), out var fbVal) && fbVal is not null)
                         {
-                            noOutput = true;
-                            break;
+                            value = fbVal;
+                            gotValue = true;
+                        }
+
+                        // 无反馈快照（首轮或反馈源未产出）→ 用种子线
+                        if (!gotValue && dataConn is not null &&
+                            outputs.TryGetValue((dataConn.FromNode, dataConn.FromPort), out var seedVal) && seedVal is not null)
+                        {
+                            value = seedVal;
+                            gotValue = true;
+                        }
+
+                        if (!gotValue)
+                        {
+                            // 端口完全未连线 / 仅作用域标记边 → 跳过该节点（控制端口本就不取数据）
+                            if (conns.Count == 0 || conns.All(c => GraphDocument.IsFlowSource(c.FromNode)))
+                            { noOutput = true; break; }
+                            if (dataConn is null && feedbackConn is not null)
+                            { noOutput = true; break; }   // 只有反馈边但首轮无快照：跳过，等下一轮
+                            noOutput = true; break;
                         }
                         inputs[port.Name] = value;
                     }

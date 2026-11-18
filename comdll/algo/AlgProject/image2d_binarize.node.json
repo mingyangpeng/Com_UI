@@ -1,0 +1,112 @@
+{
+  "node": {
+    "id": "alg.image2d.binarize",
+    "name": "二值化",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "统一二值化：0 二值/1 反二值/2 OTSU/3 自适应均值/4 自适应高斯/5 TRUNC/6 TOZERO/7 TOZERO_INV/8 双阈值区间内/9 双阈值区间外/10 双阈值三值化；支持反转"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiBinarize",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "mode",
+      "label": "模式",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 10,
+      "description": "0 二值 / 1 反二值 / 2 OTSU / 3 自适应均值 / 4 自适应高斯 / 5 TRUNC / 6 TOZERO / 7 TOZERO_INV / 8 双阈值区间内 / 9 双阈值区间外 / 10 双阈值三值化"
+    },
+    {
+      "name": "thresh",
+      "label": "阈值/下限low",
+      "type": "number",
+      "default": 128,
+      "min": 0,
+      "max": 255,
+      "description": "固定阈值；双阈值模式时为下限 low"
+    },
+    {
+      "name": "thresh2",
+      "label": "上限high",
+      "type": "number",
+      "default": 200,
+      "min": 0,
+      "max": 255,
+      "description": "双阈值上限 high（须 ≥ low）"
+    },
+    {
+      "name": "maxval",
+      "label": "最大值",
+      "type": "number",
+      "default": 255,
+      "min": 0,
+      "max": 255,
+      "description": "前景赋值（mode 10 为高值端）"
+    },
+    {
+      "name": "mid_val",
+      "label": "三值中间值",
+      "type": "number",
+      "default": 128,
+      "min": 0,
+      "max": 255,
+      "description": "三值化中间灰度（仅 mode 10 有效）"
+    },
+    {
+      "name": "block_size",
+      "label": "自适应窗口",
+      "type": "int",
+      "default": 3,
+      "min": 3,
+      "max": 51,
+      "description": "自适应窗口边长（自动补奇；mode 3/4 有效）"
+    },
+    {
+      "name": "c",
+      "label": "自适应偏移C",
+      "type": "number",
+      "default": 0,
+      "min": -100,
+      "max": 100,
+      "description": "自适应偏移常数（mode 3/4 有效）"
+    },
+    {
+      "name": "invert",
+      "label": "反转",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "非 0 对结果取反"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

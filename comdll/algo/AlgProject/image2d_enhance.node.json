@@ -22,7 +22,8 @@
       "type": "int",
       "default": 1,
       "min": 0,
-      "max": 1
+      "max": 1,
+      "description": "0 直方图均衡 / 1 CLAHE（彩色走 Lab 亮度）"
     },
     {
       "name": "clip_limit",
@@ -30,7 +31,8 @@
       "type": "number",
       "default": 2,
       "min": 0.1,
-      "max": 10
+      "max": 10,
+      "description": "CLAHE 对比度上限"
     },
     {
       "name": "tile_size",
@@ -38,7 +40,8 @@
       "type": "int",
       "default": 8,
       "min": 2,
-      "max": 64
+      "max": 64,
+      "description": "CLAHE 分块边长"
     }
   ],
   "outputs": [

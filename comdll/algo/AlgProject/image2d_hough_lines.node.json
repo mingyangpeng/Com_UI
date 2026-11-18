@@ -22,7 +22,8 @@
       "type": "number",
       "default": 1,
       "min": 0.1,
-      "max": 10
+      "max": 10,
+      "description": "距离分辨率（像素）"
     },
     {
       "name": "theta_deg",
@@ -30,7 +31,8 @@
       "type": "number",
       "default": 1,
       "min": 0.1,
-      "max": 10
+      "max": 10,
+      "description": "角度分辨率（度）"
     },
     {
       "name": "threshold",
@@ -38,7 +40,8 @@
       "type": "int",
       "default": 50,
       "min": 1,
-      "max": 10000
+      "max": 10000,
+      "description": "投票阈值"
     },
     {
       "name": "min_line_length",
@@ -46,7 +49,8 @@
       "type": "int",
       "default": 20,
       "min": 0,
-      "max": 10000
+      "max": 10000,
+      "description": "最短线长（0 不限）"
     },
     {
       "name": "max_line_gap",
@@ -54,7 +58,8 @@
       "type": "int",
       "default": 5,
       "min": 0,
-      "max": 10000
+      "max": 10000,
+      "description": "线最大断距（0 不限）"
     }
   ],
   "outputs": [

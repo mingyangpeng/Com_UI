@@ -1,4 +1,4 @@
-﻿{
+{
   "node": {
     "id": "business.region.ratio",
     "name": "区域缺陷率统计",
@@ -10,46 +10,55 @@
   "assembly": "BusinessAlg.dll",
   "method": "BusinessAlg_ComuiRegionRatio",
   "inputs": [
-    { "name": "点云", "type": "cloud" }
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
   ],
   "params": [
     {
       "name": "min_z",
       "label": "高度下限(mm)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "缺陷高度过滤下限（mm；Z 向切片带）"
     },
     {
       "name": "max_z",
       "label": "高度上限(mm)",
       "type": "number",
-      "default": 10.0
+      "default": 10.0,
+      "description": "缺陷高度过滤上限（mm）"
     },
     {
       "name": "roi_x",
       "label": "ROI 左上角X(mm)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "ROI 左上角 X（mm）"
     },
     {
       "name": "roi_y",
       "label": "ROI 左上角Y(mm)",
       "type": "number",
-      "default": 0.0
+      "default": 0.0,
+      "description": "ROI 左上角 Y（mm）"
     },
     {
       "name": "roi_w",
       "label": "ROI 宽(mm)",
       "type": "number",
       "default": 100.0,
-      "min": 0.001
+      "min": 0.001,
+      "description": "ROI 宽（mm）"
     },
     {
       "name": "roi_h",
       "label": "ROI 高(mm)",
       "type": "number",
       "default": 100.0,
-      "min": 0.001
+      "min": 0.001,
+      "description": "ROI 高（mm）"
     }
   ],
   "outputs": [],

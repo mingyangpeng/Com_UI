@@ -31,7 +31,11 @@ public partial class MainWindow : Window
     static MainWindow()
     {
         // 总线投递异常接入日志（订阅者回调 bug 不再静默/不再炸发布方线程）
-        DataBus.DeliveryError = m => App.UiLog?.Error(m);
+        DataBus.DeliveryError = m =>
+        {
+            App.UiLog?.Error(m);
+            try { System.IO.File.AppendAllText(ComUI.Core.AppPaths.ErrorLogFile, $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {m}\r\n"); } catch { }
+        };
     }
     private readonly PluginManager _manager;
 
@@ -151,6 +155,8 @@ public partial class MainWindow : Window
             var panel = _manager.UiPlugins.SelectMany(u => u.Panels).FirstOrDefault(p => p.Id == id);
             if (panel is not null) OpenPanel(panel);
         }, uiThread: true);
+        // Tool 侧边栏（算子库等）点击项 → 属性栏显示选中对象详情 + 参数控件
+        _bus.Subscribe<PropsRequest>(BusTopics.PropsShow, req => _propsView.ShowObject(req), uiThread: true);
         ApplyHostConfig();
         try
         {

@@ -22,7 +22,8 @@
       "type": "number",
       "default": 10,
       "min": 0,
-      "max": 10000000
+      "max": 10000000,
+      "description": "面积过滤下限（像素²）"
     },
     {
       "name": "max_area",
@@ -30,7 +31,8 @@
       "type": "number",
       "default": 0,
       "min": 0,
-      "max": 10000000
+      "max": 10000000,
+      "description": "面积过滤上限（≤0 不限）"
     },
     {
       "name": "min_axis",
@@ -38,7 +40,8 @@
       "type": "number",
       "default": 0,
       "min": 0,
-      "max": 10000
+      "max": 10000,
+      "description": "全轴长过滤下限（像素）"
     },
     {
       "name": "max_axis",
@@ -46,7 +49,8 @@
       "type": "number",
       "default": 0,
       "min": 0,
-      "max": 10000
+      "max": 10000,
+      "description": "全轴长过滤上限（≤0 不限）"
     }
   ],
   "outputs": [

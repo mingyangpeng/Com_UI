@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using Avalonia.Controls;
 using ComUI.Sdk;
 
@@ -116,7 +117,7 @@ public sealed class NodeGraphPlugin : IPlugin
 
     private Control CreateLibrary()
     {
-        var view = new NodeLibraryView(_opOrderPath);
+        var view = new NodeLibraryView(_opOrderPath, _ctx.Bus);
         _library = view;
         view.OperatorClicked += AddToActivePage;
         view.OperatorPlaced += (defId, screen) =>
@@ -172,10 +173,22 @@ public sealed class NodeGraphPlugin : IPlugin
     {
         var view = new NodeEditorView(_ctx.Bus, m => _ctx.Log(m));
         view.SetAlgorithmsDir(_algorithmsDir);   // 保存算法目录（动态页与主面板一致）
+        view.GroupSource = () => NodeDefs.All.Select(d => d.Group).Distinct().ToArray();   // 转算子选栏目用
         view.AlgorithmSaved += (name, path) =>
         {
-            _algorithms.Add((name, path));
+            // 按路径去重（同一算法多次保存/转算子不重复入列）
+            if (!_algorithms.Any(a => string.Equals(a.Path, path, StringComparison.OrdinalIgnoreCase)))
+                _algorithms.Add((name, path));
             _ctx.Bus.Publish(BusTopics.AlgoSaved, path);   // 宿主「算法」侧边栏即时刷新
+            // 即时重新注册子流程算子（读 params.json isOperator/group），并刷新算子库——
+            // 否则转为算子后要重启软件才能在算子库看到（原 RegisterSubPipelineOperators 只在 Initialize 调一次）。
+            try
+            {
+                RegisterSubPipelineOperators(m => _ctx.Log(m));
+                _library?.Rebuild();
+                _ctx.Log($"算子库已刷新：「{name}」即时可用");
+            }
+            catch (Exception ex) { _ctx.LogError($"算子库即时刷新失败（重启后仍会注册）: {ex.Message}"); }
         };
         _pages.Add(view);
         _views.Add(view);
@@ -225,12 +238,19 @@ public sealed class NodeGraphPlugin : IPlugin
         {
             try
             {
-                var paramsPath = Path.Combine(Path.GetDirectoryName(pipelinePath)!,
-                    Path.GetFileNameWithoutExtension(pipelinePath) + ".params.json");
+                // 与 WriteParamsConfig 命名一致：show1.pipeline.json → show1.params.json（去掉 .pipeline 后缀）
+                var nameNoExt = Path.GetFileNameWithoutExtension(pipelinePath);
+                var cfgName = nameNoExt.EndsWith(".pipeline", StringComparison.OrdinalIgnoreCase)
+                    ? nameNoExt[..^".pipeline".Length] : nameNoExt;
+                var paramsPath = Path.Combine(Path.GetDirectoryName(pipelinePath)!, cfgName + ".params.json");
                 if (!File.Exists(paramsPath)) continue;
 
                 using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(paramsPath));
                 if (!doc.RootElement.TryGetProperty("isOperator", out var isOp) || !isOp.GetBoolean()) continue;
+                // 归属栏目（保存时用户选择）；兼容旧文件无 group 字段 → 默认「子流程」
+                var group = "子流程";
+                if (doc.RootElement.TryGetProperty("group", out var g) && g.ValueKind == System.Text.Json.JsonValueKind.String
+                    && !string.IsNullOrWhiteSpace(g.GetString())) group = g.GetString()!;
 
                 var graph = new GraphDocument();
                 graph.LoadFromJson(File.ReadAllText(pipelinePath));
@@ -255,7 +275,10 @@ public sealed class NodeGraphPlugin : IPlugin
                             outputs.Add(new PortDef { Name = $"{label}.{p.Name}", Type = p.Type });
                 }
 
-                // 参数扁平化（节点名.参数名）——与 params.json 同键，面板/保存同步共用
+                // 参数扁平化——键锚定节点 Id（<节点Id>.<参数名>）：LoadFromJson 保留保存 Id →
+                // 子图里改名节点不再使父图/面板的参数覆盖失配（旧版锚节点名，改名即失效）。
+                // Label 保留可读形式（<节点名>·<参数标签>），UI 全部只显示 Label。
+                // Description 原样传播（子图节点的参数说明随扁平化带到父图属性面板）。
                 var flatParams = new List<ComUI.Sdk.AlgoParam>();
                 foreach (var n in graph.Nodes)
                 {
@@ -264,9 +287,10 @@ public sealed class NodeGraphPlugin : IPlugin
                     foreach (var p in def.Params)
                         flatParams.Add(new ComUI.Sdk.AlgoParam
                         {
-                            Name = $"{label}.{p.Name}", Label = $"{label}·{p.Label ?? p.Name}",
+                            Name = $"{n.Id}.{p.Name}", Label = $"{label}·{p.Label ?? p.Name}",
                             Type = p.Type, Default = n.Params.TryGetValue(p.Name, out var v) ? v : p.Default,
                             Min = p.Min, Max = p.Max, Options = p.Options,
+                            Description = p.Description,
                         });
                 }
 
@@ -277,15 +301,15 @@ public sealed class NodeGraphPlugin : IPlugin
                     Id = defId,
                     Name = Path.GetFileNameWithoutExtension(pipelinePath),
                     Category = "处理",
-                    Group = "子流程",
+                    Group = group,
                     Description = desc,
                     Inputs = inputs.ToArray(),
                     Outputs = outputs.ToArray(),
                     Params = flatParams.ToArray(),
                     Execute = ctx => RunSubPipeline(pipelinePathCopy, ctx),
                 };
-                if (NodeDefs.Register(subDef))
-                    log($"子流程算子已注册: {subDef.Name} <{defId}>（{inputs.Count} 入 / {outputs.Count} 出）");
+                NodeDefs.RegisterOrReplace(subDef);
+                log($"子流程算子已注册: {subDef.Name} <{defId}> → 栏目「{group}」（{inputs.Count} 入 / {outputs.Count} 出）");
             }
             catch (Exception ex)
             {
@@ -322,15 +346,16 @@ public sealed class NodeGraphPlugin : IPlugin
         var sub = new GraphDocument();
         sub.LoadFromJson(File.ReadAllText(pipelinePath));
 
-        // 扁平化参数（节点名.参数名）映射回子图节点
+        // 扁平化参数映射回子图节点：新键 = <节点Id>.<参数名>（改名稳定）；
+        // 回退旧键 = <节点名>.<参数名>（兼容旧版保存的父图/params.json）
         foreach (var n in sub.Nodes)
         {
             var def = NodeDefs.Map[n.DefId];
             var label = n.Title ?? def.Name;
             foreach (var p in def.Params)
             {
-                var key = $"{label}.{p.Name}";
-                if (ctx.Params.TryGetValue(key, out var v))
+                if (ctx.Params.TryGetValue($"{n.Id}.{p.Name}", out var v) ||
+                    ctx.Params.TryGetValue($"{label}.{p.Name}", out v))
                     n.Params[p.Name] = v;
             }
         }
