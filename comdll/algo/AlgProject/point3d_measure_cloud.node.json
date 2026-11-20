@@ -1,0 +1,65 @@
+{
+  "node": {
+    "id": "alg.point3d.measure_cloud",
+    "name": "通用点云度量",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "通用点云度量（method 0~7）：0=AABB 1=OBB(中心+半长+旋转3x3行主序，>=3点) 2=质心 3=均值协方差(>=2点) 4=逐点到目标云最近距离（需第二片点云，消息给 min/max/均值汇总） 5=平面度[pv,σ,内点数]（distance_threshold） 6=两平面夹角 7=两平面交线（plane_params 两面方程 8 值逗号分隔 a1,b1,c1,d1,a2,b2,c2,d2）；结果并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiMeasureCloud",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "cloud"
+    },
+    {
+      "name": "目标点云(方法4)",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "度量方法",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 7,
+      "description": "0=AABB 1=OBB 2=质心 3=均值协方差 4=逐点最近距离(需目标云) 5=平面度 6=两平面夹角 7=两平面交线(6/7 忽略点云输入)"
+    },
+    {
+      "name": "distance_threshold",
+      "label": "内点阈值(方法5)",
+      "type": "number",
+      "default": 0.05,
+      "min": 0.0001,
+      "max": 1000000,
+      "description": "method 5：平面度局内点距离阈值（>0）"
+    },
+    {
+      "name": "plane_params",
+      "label": "两面方程(方法6/7)",
+      "type": "text",
+      "default": "",
+      "description": "method 6/7：两面方程 8 值逗号分隔 a1,b1,c1,d1,a2,b2,c2,d2（法向零向量报错；方法 7 近平行无交线报业务失败）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

@@ -64,6 +64,9 @@ public sealed class NodeDef
     public string Group { get; init; } = "通用";
     /// <summary>算子说明（node.json node.description / 内置算子手写）——算子库属性面板展示。</summary>
     public string? Description { get; init; }
+    /// <summary>子流程算子来源的 pipeline.json 路径（仅「转为算子」生成的算子有值；内置算子为 null）。
+    /// 用于算子库删除：仅有来源文件者可被删除（内置算子删除无意义，重启会恢复）。</summary>
+    public string? SourcePipelinePath { get; init; }
     public PortDef[] Inputs { get; init; } = Array.Empty<PortDef>();
     public PortDef[] Outputs { get; init; } = Array.Empty<PortDef>();
     public ComUI.Sdk.AlgoParam[] Params { get; init; } = Array.Empty<ComUI.Sdk.AlgoParam>();
@@ -399,6 +402,79 @@ public sealed class Connection
         Nodes.Add(inst);
         Changed?.Invoke();
         return inst;
+    }
+
+    /// <summary>复制多个节点（含两端都在选择集内的连线）为片段 JSON，供卡片多选 Ctrl+C 用。
+    /// 单节点时退化为与 CopyNodeToJson 一致的行为；跨组外部连线不复制，粘贴后由用户自行重连。</summary>
+    public string CopyNodesToJson(IEnumerable<string> nodeIds)
+    {
+        var ids = nodeIds.Where(id => FindNode(id) is not null).Distinct().ToList();
+        if (ids.Count == 0) return "";
+        var idSet = ids.ToHashSet();
+        var doc = new PipelineFile
+        {
+            Nodes = ids.Select(id =>
+            {
+                var n = FindNode(id)!;
+                return new PipelineNode
+                {
+                    Id = n.Id, Def = n.DefId, Title = n.Title, X = n.X, Y = n.Y, Width = n.Width, Scope = n.Scope,
+                    Params = new Dictionary<string, JsonElement>(
+                        n.Params.Select(kv => new KeyValuePair<string, JsonElement>(kv.Key, JsonValueOf(kv.Value)))),
+                };
+            }).ToList(),
+            Connections = Connections
+                .Where(c => idSet.Contains(c.FromNode) && idSet.Contains(c.ToNode))
+                .Select(c => new PipelineConn
+                {
+                    From = c.FromNode, FromPort = c.FromPort, To = c.ToNode, ToPort = c.ToPort,
+                    Feedback = c.Feedback, Bend = c.Bend, Bend2 = c.Bend2,
+                    Anchors = c.Anchors.Count > 0
+                        ? c.Anchors.Select(a => new AnchorPoint { X = a.X, Y = a.Y }).ToList()
+                        : null,
+                }).ToList(),
+        };
+        return JsonSerializer.Serialize(doc);
+    }
+
+    /// <summary>粘贴多节点片段：全部生成新 Id，内容照搬、位置 = 原位 + 偏移，并重建组内连线；返回全部新实例。</summary>
+    public List<NodeInstance> PasteNodes(string json, double dx, double dy)
+    {
+        var result = new List<NodeInstance>();
+        var doc = JsonSerializer.Deserialize<PipelineFile>(json, new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+        });
+        if (doc is null || doc.Nodes.Count == 0) return result;
+        var idMap = new Dictionary<string, string>();
+        foreach (var n in doc.Nodes)
+        {
+            if (!NodeDefs.Map.ContainsKey(n.Def)) continue; // 算子未注册则跳过
+            var inst = new NodeInstance
+            {
+                DefId = n.Def, X = n.X + dx, Y = n.Y + dy, Title = n.Title, Width = n.Width, Scope = n.Scope,
+            };
+            if (n.Params is not null)
+                foreach (var kv in n.Params)
+                    inst.Params[kv.Key] = JsonToObject(kv.Value);
+            Nodes.Add(inst);
+            idMap[n.Id] = inst.Id;
+            result.Add(inst);
+        }
+        foreach (var c in doc.Connections)
+        {
+            if (idMap.TryGetValue(c.From, out var from) && idMap.TryGetValue(c.To, out var to))
+                Connections.Add(new Connection
+                {
+                    FromNode = from, FromPort = c.FromPort, ToNode = to, ToPort = c.ToPort,
+                    Feedback = c.Feedback, Bend = c.Bend, Bend2 = c.Bend2,
+                    Anchors = c.Anchors is { Count: > 0 }
+                        ? c.Anchors.Select(a => new AnchorPoint { X = a.X, Y = a.Y }).ToList()
+                        : new List<AnchorPoint>(),
+                });
+        }
+        Changed?.Invoke();
+        return result;
     }
 
     /// <summary>把算法 JSON 以"新实例"方式合并进当前图（拖拽算法进画布）：重映射 Id、按落点对齐包围盒。</summary>

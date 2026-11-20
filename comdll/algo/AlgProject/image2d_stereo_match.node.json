@@ -1,0 +1,71 @@
+{
+  "node": {
+    "id": "alg.image2d.stereo_match",
+    "name": "双目立体匹配",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "SGBM 半全局块匹配输出视差图（输入已校正的左右灰度图，尺寸须一致，视差=xL-xR>=0）：输出视差灰度图（像素值=整数视差，8U=/16 定标，无效视差为 0），配合 Image2DAlg_Calib.h 立体校正结果可转深度；num_disparity 须为 16 的倍数；左图 x<min_disparity+num_disparity 条带内视差不可靠（SGBM 特性）"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiStereoMatch",
+  "inputs": [
+    {
+      "name": "左图",
+      "type": "image"
+    },
+    {
+      "name": "右图",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "min_disparity",
+      "label": "视差起点",
+      "type": "int",
+      "default": 0,
+      "min": -128,
+      "max": 128,
+      "description": "视差起点（可为负，通常 0）"
+    },
+    {
+      "name": "num_disparity",
+      "label": "视差搜索数",
+      "type": "int",
+      "default": 64,
+      "min": 16,
+      "max": 512,
+      "description": "视差搜索数（须为 16 的倍数，否则报参数错）"
+    },
+    {
+      "name": "block_size",
+      "label": "匹配块边长",
+      "type": "int",
+      "default": 11,
+      "min": 3,
+      "max": 51,
+      "description": "匹配块边长（奇数，偶数自动补奇；P1/P2 平滑惩罚按 8/32·block² 自动设定）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "视差图",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

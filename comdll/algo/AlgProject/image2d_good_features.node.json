@@ -1,0 +1,76 @@
+{
+  "node": {
+    "id": "alg.image2d.good_features",
+    "name": "Shi-Tomasi 角点",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "Shi-Tomasi（goodFeaturesToTrack）角点检测：输出角点十字标注，坐标并入节点消息（与 Harris 角点同构，作为 corner_sub_pix 的初始点）"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiGoodFeatures",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "max_corners",
+      "label": "最大角点数",
+      "type": "int",
+      "default": 100,
+      "min": 1,
+      "max": 10000,
+      "description": "最多输出的角点数（按质量降序保留）"
+    },
+    {
+      "name": "quality_level",
+      "label": "质量系数",
+      "type": "number",
+      "default": 0.01,
+      "min": 0.001,
+      "max": 1,
+      "description": "相对最强角点响应的比例（典型 0.01~0.1，越小角点越多）"
+    },
+    {
+      "name": "min_distance",
+      "label": "最小间距(像素)",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 10000,
+      "description": "角点最小间距（像素，内置 NMS 去重）"
+    },
+    {
+      "name": "subpix",
+      "label": "亚像素细化",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "1=角点亚像素细化"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

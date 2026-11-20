@@ -264,7 +264,7 @@ public class GraphModelTests
         // json → JsonParam.description → AlgoParam.Description 全链路，属性面板悬浮提示/副文本消费
         var comdll = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "comdll"));
         var defs = NodeJsonRegistry.LoadFrom(comdll, _ => { }).ToList();
-        Assert.True(defs.Count >= 40, $"alg 算子应 >= 40，实际 {defs.Count}");
+        Assert.True(defs.Count >= 80, $"alg 算子应 >= 80，实际 {defs.Count}");
 
         var bin = defs.First(d => d.Id == "alg.image2d.binarize");
         Assert.Equal("二值化", bin.Name);   // 新算子上架

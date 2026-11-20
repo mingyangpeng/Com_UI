@@ -9,7 +9,15 @@
 // node.json 不声明输出端口。
 #include "AlgExport.h"
 #include "BusinessAlg/include/BusinessAlg_api.h"
+
+// bump NG 判定算子头依赖 PCL（Point3DAlg_DomeFit.h 直接 include <pcl/*>）。
+// PCL 可用性以 SHAPELYALG_HAS_PCL 判定：ShapelyAlg 在 PCL_FOUND 时 PUBLIC 定义，
+// 随本库链接 ShapelyAlg 传入（同 Point3DAlg_comui.cpp 的 POINT3DALG_HAS_PCL 先例）。
+// 无 PCL 时下方 PCL 段入口不编译——宿主加载 business.bump_ng_check 节点会得到
+// 明确的"方法不存在"，而非 DLL 链接失败（工单 002 无 PCL 构建）。
+#ifdef SHAPELYALG_HAS_PCL
 #include "Point3DAlg/tools/Point3DAlg_DomeFit.h"
+#endif
 
 #include <vector>
 #include "comui_native_abi.h"
@@ -32,6 +40,24 @@ BUSINESSALG_EXPORT void algo_free(void* p) {
 //   4=roi_w(number) 5=roi_h(number)
 // 输入：1 片点云（SoA float[3N]）；输出：无端口，结果并入节点消息。
 
+// @comui-node-begin
+// {
+//   "node": {"id":"business.region.ratio","name":"区域缺陷率统计","group":"业务算子","category":"处理","description":"点云按高度区间过滤后 2.5D 投影，与 ROI 求交计算缺陷面积占比；结果并入节点消息输出"},
+//   "inputs": [
+//     {"name":"点云","type":"cloud"}
+//   ],
+//   "params": [
+//     {"name":"min_z","label":"高度下限(mm)","type":"number","default":0.0,"description":"缺陷高度过滤下限（mm；Z 向切片带）"},
+//     {"name":"max_z","label":"高度上限(mm)","type":"number","default":10.0,"description":"缺陷高度过滤上限（mm）"},
+//     {"name":"roi_x","label":"ROI 左上角X(mm)","type":"number","default":0.0,"description":"ROI 左上角 X（mm）"},
+//     {"name":"roi_y","label":"ROI 左上角Y(mm)","type":"number","default":0.0,"description":"ROI 左上角 Y（mm）"},
+//     {"name":"roi_w","label":"ROI 宽(mm)","type":"number","default":100.0,"min":0.001,"description":"ROI 宽（mm）"},
+//     {"name":"roi_h","label":"ROI 高(mm)","type":"number","default":100.0,"min":0.001,"description":"ROI 高（mm）"}
+//   ],
+//   "outputs": [],
+//   "source": {"files": ["integration/comui/BusinessAlg_comui.cpp","src/BusinessAlg/BusinessAlg_Region.cpp","src/BusinessAlg/include/BusinessAlg_api.h","src/AlgExport.h","src/ShapelyAlg/ShapelyAlg.h","src/ShapelyAlg/Stereo.h","src/ShapelyAlg/Geom.h","src/ShapelyAlg/Types.h","src/ShapelyAlg/Stereo.cpp","src/ShapelyAlg/Geom.cpp"], "includes": ["src","src/ShapelyAlg","src/BusinessAlg"]}
+// }
+// @comui-node-end
 BUSINESSALG_EXPORT int BusinessAlg_ComuiRegionRatio(const AlgoCInput* in, AlgoCOutput* out) {
     memset(out, 0, sizeof(*out));
     if (in->cloudCount < 1 || !in->clouds) { out->error = "输入未连线"; return 1; }
@@ -69,6 +95,8 @@ BUSINESSALG_EXPORT int BusinessAlg_ComuiRegionRatio(const AlgoCInput* in, AlgoCO
 
 } // extern "C"
 
+#ifdef SHAPELYALG_HAS_PCL   // PCL 段：依赖 Point3DAlg_DomeFit/BumpCompare（PCL 工具层），无 PCL 时入口不编译
+
 // ---------------- 算子入口：bump 高度 NG 判定（node.json: business.bump_ng_check） ----------------
 // 业务编排示例：Point3DAlg_DomeFit（基准/被测各拟合）→ Point3DAlg_BumpCompare（一对一
 // 匹配 + 高度差 NG）。参数（按 node.json 声明顺序）：ng_threshold(number, 0.02)
@@ -76,6 +104,25 @@ BUSINESSALG_EXPORT int BusinessAlg_ComuiRegionRatio(const AlgoCInput* in, AlgoCO
 // 输入：2 片点云（clouds[0]=基准，clouds[1]=被测）
 // 输出：NG 差异点云（每配对 bump 一点：x/y=apex，z=高度偏差，正=被测高）+ 统计消息
 
+// @comui-node-begin
+// {
+//   "node": {"id":"business.bump_ng_check","name":"bump高度NG判定","group":"业务算子","category":"处理","description":"业务编排示例：基准/被测点云各自拟合拱形球顶 bump（Point3DAlg_DomeFit），一对一匹配后按高度差判 NG（Point3DAlg_BumpCompare）；输出每配对一点（z=高度偏差）+ 判定统计"},
+//   "inputs": [
+//     {"name":"基准点云","type":"cloud"},
+//     {"name":"被测点云","type":"cloud"}
+//   ],
+//   "params": [
+//     {"name":"ng_threshold","label":"NG阈值(mm)","type":"number","default":0.02,"min":0.0,"description":"高度差 NG 阈值（mm；|dh| > 阈值判 NG）"},
+//     {"name":"match_radius","label":"XY匹配半径(mm)","type":"number","default":0.3,"min":0.01,"description":"bump 一对一配对搜索半径（mm；两片云 XY 需大致对齐）"},
+//     {"name":"height_threshold","label":"bump判定高度(mm)","type":"number","default":0.02,"min":0.0,"description":"球顶拟合的基面分离高度阈值（mm）"},
+//     {"name":"cluster_tolerance","label":"bump聚类连通距离(mm)","type":"number","default":0.25,"min":0.01,"description":"球顶拟合的聚类邻域半径（mm）"}
+//   ],
+//   "outputs": [
+//     {"name":"NG差异点云","type":"cloud"}
+//   ],
+//   "source": {"files": ["integration/comui/BusinessAlg_comui.cpp","integration/comui/comui_native_abi.h","src/AlgExport.h","src/BusinessAlg/include/BusinessAlg_api.h","src/BusinessAlg/BusinessAlg_Region.cpp","src/Point3DAlg/tools/Point3DAlg_DomeFit.h","src/Point3DAlg/tools/Point3DAlg_DomeFit.cpp","src/Point3DAlg/tools/Point3DAlg_FitUtil.h","src/ShapelyAlg/ShapelyAlg.h"], "includes": ["src","src/Point3DAlg/tools","src/ShapelyAlg"]}
+// }
+// @comui-node-end
 extern "C" BUSINESSALG_EXPORT int BusinessAlg_ComuiBumpNgCheck(const AlgoCInput* in, AlgoCOutput* out) {
     memset(out, 0, sizeof(*out));
     if (in->cloudCount < 2 || !in->clouds) { out->error = "需要两片输入点云（基准/被测）"; return 1; }
@@ -152,3 +199,5 @@ extern "C" BUSINESSALG_EXPORT int BusinessAlg_ComuiBumpNgCheck(const AlgoCInput*
     out->error = msgBuf;
     return 0;
 }
+
+#endif   // SHAPELYALG_HAS_PCL（bump NG 判定 PCL 段）

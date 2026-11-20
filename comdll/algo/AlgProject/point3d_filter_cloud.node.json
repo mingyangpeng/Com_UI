@@ -1,0 +1,239 @@
+{
+  "node": {
+    "id": "alg.point3d.filter_cloud",
+    "name": "点云滤波",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "点云滤波/降采样（PCL，method 0~9 全量）：体素质心/随机/等间隔/最远点采样、剔除非有限点、去重、直通/条件滤波、统计/半径离群剔除；未用参数保持默认跳过；输出无颜色（查看器按高度伪彩上色），in/out 点数并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiFilterCloud",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "滤波方法",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 9,
+      "description": "0=voxel体素质心降采样 1=random随机采样 2=uniform等间隔采样 3=farthest最远点采样 4=removeNonFinite剔除非有限点 5=removeDuplicates去重 6=passThrough直通滤波 7=statisticalOutlier统计离群剔除 8=radiusOutlier半径离群剔除 9=conditionalXYZ条件滤波"
+    },
+    {
+      "name": "leaf_size",
+      "label": "体素边长(method 0)",
+      "type": "number",
+      "default": 0.01,
+      "min": 0.0001,
+      "max": 1000000,
+      "description": "method 0：体素边长（三轴同值，>0；每格输出质心）"
+    },
+    {
+      "name": "min_points_per_voxel",
+      "label": "格最少点数(method 0)",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 1000000,
+      "description": "method 0 可选：每体素最少点数（0 = 不过滤）"
+    },
+    {
+      "name": "sample_size",
+      "label": "采样点数(method 1)",
+      "type": "number",
+      "default": 10000,
+      "min": 1,
+      "max": 100000000,
+      "description": "method 1：随机采样目标点数（>= 点数时返回副本）"
+    },
+    {
+      "name": "seed",
+      "label": "随机种子(method 1)",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 2147483647,
+      "description": "method 1 可选：随机种子（固定可复现）"
+    },
+    {
+      "name": "every_k",
+      "label": "间隔k(method 2)",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 1000000,
+      "description": "method 2：每 k 点保留 1 个（>0）"
+    },
+    {
+      "name": "num_samples",
+      "label": "采样点数(method 3)",
+      "type": "number",
+      "default": 10000,
+      "min": 1,
+      "max": 100000000,
+      "description": "method 3：最远点采样目标点数"
+    },
+    {
+      "name": "start_index",
+      "label": "首采样点(method 3)",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 100000000,
+      "description": "method 3 可选：首采样点索引（默认 0）"
+    },
+    {
+      "name": "tolerance",
+      "label": "去重容差(method 5)",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 1000000,
+      "description": "method 5 可选：去重容差（0 = 坐标完全相等才去重）"
+    },
+    {
+      "name": "field",
+      "label": "滤波字段(method 6)",
+      "type": "int",
+      "default": 2,
+      "min": 0,
+      "max": 2,
+      "description": "method 6：直通滤波字段 0=x 1=y 2=z"
+    },
+    {
+      "name": "limit_min",
+      "label": "下限(method 6)",
+      "type": "number",
+      "default": -1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 6：保留 [下限,上限] 闭区间（默认全量 = 不裁）"
+    },
+    {
+      "name": "limit_max",
+      "label": "上限(method 6)",
+      "type": "number",
+      "default": 1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 6：上限（min > max 报参数错）"
+    },
+    {
+      "name": "mean_k",
+      "label": "近邻个数(method 7)",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 1000,
+      "description": "method 7：统计离群剔除的近邻个数（>=1）"
+    },
+    {
+      "name": "std_dev_mul",
+      "label": "标准差倍数(method 7)",
+      "type": "number",
+      "default": 1.0,
+      "min": 0,
+      "max": 100,
+      "description": "method 7：距离均值超过 倍数×σ 判离群（典型 1~2）"
+    },
+    {
+      "name": "radius",
+      "label": "搜索半径(method 8)",
+      "type": "number",
+      "default": 0.5,
+      "min": 0.0001,
+      "max": 1000000,
+      "description": "method 8：半径离群剔除的搜索半径（>0）"
+    },
+    {
+      "name": "min_neighbors",
+      "label": "最少邻居(method 8)",
+      "type": "number",
+      "default": 10,
+      "min": 0,
+      "max": 1000000,
+      "description": "method 8：半径内邻居数低于该值的点剔除"
+    },
+    {
+      "name": "x_min",
+      "label": "X下限(method 9)",
+      "type": "number",
+      "default": -1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 9：条件滤波 x 下限（开区间，默认全量 = 不裁）"
+    },
+    {
+      "name": "x_max",
+      "label": "X上限(method 9)",
+      "type": "number",
+      "default": 1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 9：x 上限（任一 min>max 报参数错）"
+    },
+    {
+      "name": "y_min",
+      "label": "Y下限(method 9)",
+      "type": "number",
+      "default": -1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 9：y 下限"
+    },
+    {
+      "name": "y_max",
+      "label": "Y上限(method 9)",
+      "type": "number",
+      "default": 1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 9：y 上限"
+    },
+    {
+      "name": "z_min",
+      "label": "Z下限(method 9)",
+      "type": "number",
+      "default": -1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 9：z 下限"
+    },
+    {
+      "name": "z_max",
+      "label": "Z上限(method 9)",
+      "type": "number",
+      "default": 1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 9：z 上限"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

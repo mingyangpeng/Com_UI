@@ -16,11 +16,10 @@ using ComUI.Sdk.Ui;
 namespace ComUI.Host.Views;
 
 /// <summary>
-/// 「算法配方」侧边栏（活动栏 ⚡）：上半 = 算法插件命令（单击弹参数框运行），下半 = 流水线算法配方（单击发布 pipeline/open）。
+/// 「算法配方」侧边栏（活动栏 ⚡）：流水线算法配方（单击发布 pipeline/open）。
 /// </summary>
 public sealed class AlgoSidebar : UserControl
 {
-    private readonly Action<AlgoRecord, AlgoCommand> _onRun;
     private readonly IBus _bus;
     private readonly StackPanel _root = new() { Margin = new Thickness(8, 10), Spacing = 2 };
     private readonly StackPanel _pipelineSection = new() { Margin = new Thickness(0, 6, 0, 0) };
@@ -41,9 +40,8 @@ public sealed class AlgoSidebar : UserControl
     private readonly Dictionary<string, Button> _rowByPath = new(); // 路径→行按钮（高亮刷新用）
     private bool _ctrlDown;   // Ctrl 按住状态（Ctrl+单击 = 多选切换）
 
-    public AlgoSidebar(Action<AlgoRecord, AlgoCommand> onRun, IBus bus)
+    public AlgoSidebar(IBus bus)
     {
-        _onRun = onRun;
         _bus = bus;
         Background = new SolidColorBrush(Color.FromRgb(0x23, 0x23, 0x26));
         Content = new ScrollViewer
@@ -86,7 +84,7 @@ public sealed class AlgoSidebar : UserControl
             else if (e.Key is Key.Delete or Key.Back)
             {
                 e.Handled = true;
-                DeleteSelected();
+                _ = DeleteSelectedAsync();
             }
         };
         KeyUp += (_, e) =>
@@ -98,8 +96,8 @@ public sealed class AlgoSidebar : UserControl
     private static string NameOf(string path) =>
         Path.GetFileNameWithoutExtension(path).Replace(".pipeline", "");
 
-    /// <summary>Del/Backspace：删除选中的算法文件（锁定状态拒绝——先解锁或复制副本）。</summary>
-    private void DeleteSelected()
+    /// <summary>Del/Backspace：删除选中的算法文件（锁定状态拒绝——先解锁或复制副本）。删除前弹窗二次确认。</summary>
+    private async Task DeleteSelectedAsync()
     {
         if (_lastClickedPath is null || !File.Exists(_lastClickedPath))
         {
@@ -111,9 +109,13 @@ public sealed class AlgoSidebar : UserControl
             LogMessage?.Invoke($"「{NameOf(_lastClickedPath)}」已锁定，解锁后才能删除（或复制副本后删副本）");
             return;
         }
+        var name = NameOf(_lastClickedPath);
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        bool ok = await ConfirmDialog.ShowAsync(owner, "确认删除算法",
+            $"确定要删除算法「{name}」吗？\n\n此操作不可恢复（文件将从磁盘永久删除）。", "删除", danger: true);
+        if (!ok) { LogMessage?.Invoke($"已取消删除「{name}」"); return; }
         try
         {
-            var name = NameOf(_lastClickedPath);
             File.Delete(_lastClickedPath);
             _lastClickedPath = null;
             _copiedPath = null;
@@ -124,6 +126,48 @@ public sealed class AlgoSidebar : UserControl
         {
             LogMessage?.Invoke($"删除失败: {ex.Message}");
         }
+    }
+
+    /// <summary>批量删除：先筛出可删项，弹窗列出名称二次确认后再删（锁定项跳过）。</summary>
+    private async Task DeleteManyAsync()
+    {
+        if (_selectedPaths.Count == 0)
+        {
+            LogMessage?.Invoke("先选择算法再删除：单击选中、Ctrl+单击多选，或点 ☑ 全选");
+            return;
+        }
+        var deletable = _selectedPaths.Where(p => File.Exists(p) && !FileLock.IsLocked(p)).ToList();
+        int skipped = _selectedPaths.Count(p => FileLock.IsLocked(p));
+        if (deletable.Count == 0)
+        {
+            LogMessage?.Invoke(skipped > 0
+                ? $"选中的 {skipped} 个算法已全部锁定，无法删除（先解锁）"
+                : "选中的算法文件已不存在");
+            return;
+        }
+        var names = deletable.Select(NameOf).ToList();
+        var nameText = names.Count <= 6
+            ? string.Join("、", names)
+            : string.Join("、", names.Take(6)) + $" 等 {names.Count} 个";
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        bool ok = await ConfirmDialog.ShowAsync(owner, "确认批量删除算法",
+            $"确定要删除 {names.Count} 个算法吗？\n\n{nameText}\n\n此操作不可恢复（文件将从磁盘永久删除）。"
+            + (skipped > 0 ? $"\n\n另有 {skipped} 个已锁定将被跳过。" : ""),
+            $"删除 {names.Count} 个", danger: true);
+        if (!ok) { LogMessage?.Invoke("已取消批量删除"); return; }
+        int deleted = 0;
+        foreach (var p in deletable)
+        {
+            try { File.Delete(p); deleted++; }
+            catch (Exception ex) { LogMessage?.Invoke($"删除「{NameOf(p)}」失败: {ex.Message}"); }
+        }
+        _selectedPaths.Clear();
+        _lastClickedPath = null;
+        _copiedPath = null;
+        RefreshPipelines();
+        LogMessage?.Invoke(skipped > 0
+            ? $"已删除 {deleted} 个算法；{skipped} 个已锁定被跳过（解锁后再删）"
+            : $"已删除 {deleted} 个算法");
     }
 
     /// <summary>Ctrl+V：把复制的算法文件粘贴为「原名 副本」（解锁可编辑，重名自动递增）。</summary>
@@ -277,7 +321,7 @@ public sealed class AlgoSidebar : UserControl
             _pipelineRows[0].InvalidateMeasure();
     }
 
-    /// <summary>「流水线算法」标题行：左侧标题，右侧 4 个小图标按钮（全选 / 全锁 / 解锁 / 删除）。</summary>
+    /// <summary>「流水线算法」标题行：左侧标题，右侧 5 个小图标按钮（新建页面 / 全选 / 全锁 / 解锁 / 删除）。</summary>
     private Control BuildPipelineHeader(List<string> files)
     {
         Control MakeToolBtn(object content, string tip, Action click)
@@ -301,6 +345,10 @@ public sealed class AlgoSidebar : UserControl
         }
 
         var strip = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 1, VerticalAlignment = VerticalAlignment.Center };
+
+        // 新建流水线页面：经总线请求流水线插件开一个空白页（宿主不直接引用插件）
+        strip.Children.Add(MakeToolBtn("➕", "新建空白流水线页面", () =>
+            _bus.Publish<object?>(BusTopics.PipelineNew, null)));
 
         // 全选：全部算法加入多选集合（Ctrl+单击行可逐个增减；再点一次取消全选）
         strip.Children.Add(MakeToolBtn("☑", "全选（Ctrl+单击行可增减）", () =>
@@ -334,29 +382,8 @@ public sealed class AlgoSidebar : UserControl
             LogMessage?.Invoke($"已解锁全部 {files.Count} 个算法");
         }));
 
-        // 删除：批量删除选中的（锁定的跳过并提示）
-        strip.Children.Add(MakeToolBtn("🗑", "删除选中的算法（锁定的跳过）", () =>
-        {
-            if (_selectedPaths.Count == 0)
-            {
-                LogMessage?.Invoke("先选择算法再删除：单击选中、Ctrl+单击多选，或点 ☑ 全选");
-                return;
-            }
-            int deleted = 0, skipped = 0;
-            foreach (var p in _selectedPaths.ToList())
-            {
-                if (!File.Exists(p)) continue;
-                if (FileLock.IsLocked(p)) { skipped++; continue; }
-                try { File.Delete(p); deleted++; } catch (Exception ex) { LogMessage?.Invoke($"删除「{NameOf(p)}」失败: {ex.Message}"); }
-            }
-            _selectedPaths.Clear();
-            _lastClickedPath = null;
-            _copiedPath = null;
-            RefreshPipelines();
-            LogMessage?.Invoke(skipped > 0
-                ? $"已删除 {deleted} 个算法；{skipped} 个已锁定被跳过（解锁后再删）"
-                : $"已删除 {deleted} 个算法");
-        }));
+        // 删除：批量删除选中的（锁定的跳过并提示），删除前弹窗二次确认
+        strip.Children.Add(MakeToolBtn(TrashGlyph.Build(), "删除选中的算法（锁定的跳过）", () => _ = DeleteManyAsync()));
 
         var title = new TextBlock
         {
@@ -413,84 +440,8 @@ public sealed class AlgoSidebar : UserControl
     }
 
 
-    public void Refresh(IReadOnlyList<AlgoRecord> algos)
+    public void Refresh()
     {
-        _root.Children.Clear();
-
-        if (algos.Count == 0)
-        {
-            _root.Children.Add(new TextBlock
-            {
-                Text = "尚无已加载的算法插件\n\n算法 DLL + *.algo.json 放入 comdll/algo/ 后\n按 F5 重新加载",
-                FontSize = 12,
-                LineHeight = 19,
-                Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x7F)),
-                Margin = new Thickness(8, 16, 8, 0),
-                TextWrapping = TextWrapping.Wrap,
-            });
-            return;
-        }
-
-        foreach (var algo in algos)
-        {
-            var head = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 6,
-                Margin = new Thickness(6, 10, 0, 4),
-            };
-            head.Children.Add(new TextBlock
-            {
-                Text = $"{algo.Name}  v{algo.Version}",
-                FontSize = 11.5,
-                Foreground = new SolidColorBrush(Color.FromRgb(0x8A, 0x8A, 0x92)),
-            });
-            if (algo.IsJsonDriven)
-            {
-                head.Children.Add(new Border
-                {
-                    Background = new SolidColorBrush(Color.FromRgb(0x2D, 0x3F, 0x2F)),
-                    CornerRadius = new CornerRadius(3),
-                    Padding = new Thickness(5, 0),
-                    Child = new TextBlock
-                    {
-                        Text = "JSON",
-                        FontSize = 10,
-                        Foreground = new SolidColorBrush(Color.FromRgb(0x7B, 0xC8, 0x86)),
-                    },
-                });
-            }
-            _root.Children.Add(head);
-
-            foreach (var cmd in algo.Commands)
-            {
-                var a = algo;
-                var c = cmd;
-                var row = new Button
-                {
-                    Classes = { "sideitem" },
-                    Content = new StackPanel
-                    {
-                        Orientation = Orientation.Horizontal,
-                        Spacing = 8,
-                        Children =
-                        {
-                            new TextBlock
-                            {
-                                Text = "▶",
-                                FontSize = 10,
-                                Foreground = new SolidColorBrush(Color.FromRgb(0x4F, 0xC1, 0xFF)),
-                                VerticalAlignment = VerticalAlignment.Center,
-                            },
-                            new TextBlock { Text = c.Title, VerticalAlignment = VerticalAlignment.Center },
-                        },
-                    },
-                };
-                ToolTip.SetTip(row, string.IsNullOrWhiteSpace(c.Id) ? c.Title : c.Id);
-                row.Click += (_, _) => _onRun(a, c);
-                _root.Children.Add(row);
-            }
-        }
         _root.Children.Add(_pipelineSection);
         RefreshPipelines();
     }

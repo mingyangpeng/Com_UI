@@ -1,0 +1,56 @@
+{
+  "node": {
+    "id": "alg.image2d.filter2d",
+    "name": "自定义卷积核滤波",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "filter2D 任意线性滤波（k×k 行主序卷积核，锚点=核中心）：锐化核 0,-1,0,-1,5,-1,0,-1,0、高斯平滑核（须预归一化 ÷16）0.0625,0.125,0.0625,0.125,0.25,0.125,0.0625,0.125,0.0625——未归一化核会把亮度整体放大至饱和；默认恒等核（原图直通）。8U/16U 输入 CV_16S 中间取绝对值饱和回原深度，浮点输入同深度保符号；ksize 1~51 奇数，kernel 值个数须 = ksize×ksize"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiFilter2D",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "kernel",
+      "label": "卷积核",
+      "type": "text",
+      "default": "0,0,0,0,1,0,0,0,0",
+      "description": "ksize×ksize 个逗号分隔数值，行主序（锚点=核中心）；3×3 即 9 值"
+    },
+    {
+      "name": "ksize",
+      "label": "核边长",
+      "type": "int",
+      "default": 3,
+      "min": 1,
+      "max": 51,
+      "description": "核边长（奇数 1~51，偶数报参数错）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

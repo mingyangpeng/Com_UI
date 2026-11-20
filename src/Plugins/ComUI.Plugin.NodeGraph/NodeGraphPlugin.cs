@@ -25,6 +25,7 @@ public sealed class NodeGraphPlugin : IPlugin
     private string _opOrderPath = "";       // 算子库栏目顺序持久化（config/op_order.json）
     private IDisposable? _busSub;
     private IDisposable? _lockSub;
+    private IDisposable? _newSub;
 
     /// <summary>已保存的算法（文件名, 完整路径）。</summary>
     private readonly List<(string Name, string Path)> _algorithms = new();
@@ -36,6 +37,8 @@ public sealed class NodeGraphPlugin : IPlugin
         context.AddFileMenuEntry("新建流水线页面", NewPage);
         // 宿主「算法」侧边栏单击流水线算法 → 展开到最近页面
         _busSub = context.Bus.Subscribe<string>(BusTopics.PipelineOpen, OpenPipeline, uiThread: true);
+        // 侧边栏「➕ 新建流水线页面」→ 新建空白页
+        _newSub = context.Bus.Subscribe<object?>(BusTopics.PipelineNew, _ => NewPage(), uiThread: true);
         // 侧边栏锁定/解锁切换 → 同步已打开页面的只读状态
         _lockSub = context.Bus.Subscribe<string>(BusTopics.AlgoLocked, OnAlgoLockChanged, uiThread: true);
 
@@ -101,6 +104,7 @@ public sealed class NodeGraphPlugin : IPlugin
             Title = "算法流水线",
             Role = PanelRole.Document,
             AutoOpen = true,
+            Icon = "🔀",
             // 注册面板走宿主标签页，不再重复开动态页
             CreateView = () => OpenPage("算法流水线", openDynamic: false),
         },
@@ -125,6 +129,7 @@ public sealed class NodeGraphPlugin : IPlugin
             var node = (_activeEditor ?? _pages.LastOrDefault())?.PlaceNodeAtScreen(defId, screen);
             if (node is not null) ApplyParamOverrides(node, defId);   // 拖拽放置同样应用面板参数覆盖
         };
+        view.OperatorDeleteRequested += (defId, pipelinePath) => DeleteOperator(defId, pipelinePath);
         _views.Add(view);
         return view;
     }
@@ -306,6 +311,7 @@ public sealed class NodeGraphPlugin : IPlugin
                     Inputs = inputs.ToArray(),
                     Outputs = outputs.ToArray(),
                     Params = flatParams.ToArray(),
+                    SourcePipelinePath = pipelinePathCopy,   // 记录来源，供算子库删除算子时定位文件
                     Execute = ctx => RunSubPipeline(pipelinePathCopy, ctx),
                 };
                 NodeDefs.RegisterOrReplace(subDef);
@@ -316,6 +322,36 @@ public sealed class NodeGraphPlugin : IPlugin
                 // 单个流水线损坏不阻断其它子流程注册
                 log($"子流程算子注册失败 {Path.GetFileName(pipelinePath)}: {ex.Message}");
             }
+        }
+    }
+
+    /// <summary>删除子流程算子：删来源 pipeline.json + params.json → 注销定义 → 刷新算子库与算法侧边栏。
+    /// 二次确认已在算子库视图负责；此处只做实际删除（内置算子无 SourcePipelinePath，不会走到这里）。</summary>
+    private void DeleteOperator(string defId, string pipelinePath)
+    {
+        try
+        {
+            var name = Path.GetFileNameWithoutExtension(pipelinePath);
+            var dir = Path.GetDirectoryName(pipelinePath)!;
+            var cfgName = name.EndsWith(".pipeline", StringComparison.OrdinalIgnoreCase)
+                ? name[..^".pipeline".Length] : name;
+            var paramsPath = Path.Combine(dir, cfgName + ".params.json");
+
+            if (File.Exists(pipelinePath)) File.Delete(pipelinePath);
+            if (File.Exists(paramsPath)) File.Delete(paramsPath);
+
+            // 从内存算法列表移除（避免残留脏数据）
+            _algorithms.RemoveAll(a => string.Equals(a.Path, pipelinePath, StringComparison.OrdinalIgnoreCase));
+            NodeDefs.Unregister(defId);
+
+            // 刷新两边：算子库重建 + 宿主「算法」侧边栏重新扫描（借 AlgoSaved 事件触发 RefreshPipelines）
+            _library?.Rebuild();
+            _ctx.Bus.Publish(BusTopics.AlgoSaved, pipelinePath);
+            _ctx.Log($"已删除算子「{name}」及其流水线文件");
+        }
+        catch (Exception ex)
+        {
+            _ctx.LogError($"删除算子失败: {ex.Message}");
         }
     }
 
@@ -407,6 +443,8 @@ public sealed class NodeGraphPlugin : IPlugin
         _busSub = null;
         _lockSub?.Dispose();
         _lockSub = null;
+        _newSub?.Dispose();
+        _newSub = null;
         foreach (var v in _views) v.Dispose();
         _views.Clear();
         _pages.Clear();

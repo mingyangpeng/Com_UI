@@ -54,12 +54,19 @@ struct IMAGE2DALG_EXPORT StereoRectify {
 
 // ---------------- Mei 等距模型：投影 / 反投影 ----------------
 
-/// 世界点（相机系）→ 像素坐标。返回 false 表示点在有效视场外。
+/// 世界点（相机系）→ 像素坐标。
+/// [in]  X       相机系世界点 [x,y,z]（零向量或 z 落在 ξ+cosθ ≈ 0 的奇异侧 → false）
+/// [in]  K       内参（xi / mei 参数参与投影）
+/// [out] out_uv  像素坐标 [u,v]
 IMAGE2DALG_EXPORT bool MeiProjectPoint(
     const double X[3], const CameraIntrinsics& K, double out_uv[2]);
 
 /// 像素坐标 → 归一化方向（相机系单位向量，Mei 反投影）。
-/// 迭代求解（Mei 模型反投影无闭式解，牛顿法 3~5 次收敛）。
+/// [in]  u/v      像素坐标
+/// [in]  K        内参
+/// [out] out_dir  相机系单位方向向量
+/// 迭代求解（Mei 模型反投影无闭式解，牛顿法 3~5 次收敛）；
+/// 返回 false = θ 求解不收敛或奇异分母近零（像素超出有效视场）。
 IMAGE2DALG_EXPORT bool MeiUnprojectPixel(
     double u, double v, const CameraIntrinsics& K, double out_dir[3]);
 
@@ -126,6 +133,8 @@ IMAGE2DALG_EXPORT bool CalibrateStereo(
 // ---------------- 标定结果持久化 ----------------
 
 /// 保存为 key=value 文本（所有字段逐行写出，易读易解析）。
+/// [in] path  目标文件（父目录须已存在）；ext/rect 为 nullptr 时只写内参段
+/// 返回 false = 打开或写入失败。
 IMAGE2DALG_EXPORT bool CalibSave(const char* path, const CameraIntrinsics& K,
                                  const StereoExtrinsics* ext = nullptr,
                                  const StereoRectify* rect = nullptr);

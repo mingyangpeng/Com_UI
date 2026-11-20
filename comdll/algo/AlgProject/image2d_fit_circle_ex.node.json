@@ -1,0 +1,39 @@
+{
+  "node": {
+    "id": "alg.image2d.fit_circle_ex",
+    "name": "单目标圆拟合Ex",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "高精度圆拟合（Kåsa 初值 + Gauss-Newton 几何精化）：圆心/半径/残差 rms 并入消息，并输出单点云（x=圆心x y=圆心y z=半径）；与 fit_circle（Kåsa 纯代数版）的分工：本节点几何精化后残差更小，适合高精度孔径/定位测量；共线/点数<3 报错"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiFitCircleEx",
+  "inputs": [
+    {
+      "name": "点集",
+      "type": "cloud"
+    }
+  ],
+  "params": [],
+  "outputs": [
+    {
+      "name": "圆心点",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

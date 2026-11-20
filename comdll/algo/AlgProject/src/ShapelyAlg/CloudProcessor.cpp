@@ -20,6 +20,7 @@
 #include <pcl/filters/crop_box.h>
 #include <pcl/filters/random_sample.h>
 #include <pcl/filters/filter.h>
+#include <pcl/filters/approximate_voxel_grid.h>
 #include <pcl/common/transforms.h>
 #include <pcl/common/io.h>
 #include <pcl/common/centroid.h>
@@ -526,6 +527,22 @@ CloudProcessor<PointT>::filterConditionalXYZ(const CloudConstPtr& src,
 }
 
 // ---------------- extract ----------------
+
+template <typename PointT>
+typename CloudProcessor<PointT>::CloudPtr
+CloudProcessor<PointT>::filterApproxVoxelGrid(const CloudConstPtr& src, double leaf)
+{
+    if (!src || src->empty() || !(leaf > 0.0))
+        return CloudPtr();
+    // ApproximateVoxelGrid：哈希近似质心（无精确 VoxelGrid 的排序开销），大点云
+    // 降采样首选；输出质心与精确版可有微小偏差，格数可能有 1~2% 出入（头文件注释）。
+    pcl::ApproximateVoxelGrid<PointT> veg;
+    veg.setInputCloud(src);
+    veg.setLeafSize((float)leaf, (float)leaf, (float)leaf);
+    CloudPtr out(new pcl::PointCloud<PointT>());
+    veg.filter(*out);
+    return out->empty() ? CloudPtr() : out;
+}
 
 template <typename PointT>
 typename CloudProcessor<PointT>::CloudPtr
@@ -1484,6 +1501,38 @@ bool CloudProcessor<PointT>::segmentPlaneRANSAC(const CloudConstPtr& src, double
 }
 
 template <typename PointT>
+bool CloudProcessor<PointT>::fitLine3D(const CloudConstPtr& src, FitMethod method,
+                                       double distance_threshold,
+                                       std::vector<float>& out_point, std::vector<float>& out_dir,
+                                       std::vector<int>& out_inliers)
+{
+    // SACMODEL_LINE：系数 [线上一点(x,y,z), 单位方向(dx,dy,dz)]；不需要法线，
+    // RANSAC/LMEDS/MSAC 三种方法原生支持（与 fitPlane 同款框架）。
+    CloudPtr clean;
+    std::vector<int> global;
+    if (!fitInputClean<PointT>(src, clean, global))
+        return false;
+    pcl::SACSegmentation<PointT> seg;
+    seg.setInputCloud(clean);
+    seg.setModelType(pcl::SACMODEL_LINE);
+    seg.setMethodType(toSacMethod(method));
+    seg.setDistanceThreshold(distance_threshold);
+    seg.setOptimizeCoefficients(true);
+    pcl::PointIndices inliers;
+    pcl::ModelCoefficients coeffs;
+    seg.segment(inliers, coeffs);
+    if (inliers.indices.empty() || coeffs.values.size() < 6)
+        return false;
+    out_point.assign(coeffs.values.begin(), coeffs.values.begin() + 3);
+    out_dir.assign(coeffs.values.begin() + 3, coeffs.values.begin() + 6);
+    out_inliers.clear();
+    out_inliers.reserve(inliers.indices.size());
+    for (int i : inliers.indices)
+        out_inliers.push_back(global[(size_t)i]);   // 映射回原始 src 行号（inlier 索引契约）
+    return true;
+}
+
+template <typename PointT>
 std::vector<typename CloudProcessor<PointT>::CloudPtr>
 CloudProcessor<PointT>::segmentEuclideanCluster(const CloudConstPtr& src, double cluster_tolerance,
                                                 int min_size, int max_size)
@@ -1532,7 +1581,9 @@ int CloudProcessor<PointT>::segmentDBSCAN(const CloudConstPtr& src, double eps, 
 
     const int n = (int)clean->size();
     out_labels.assign((size_t)n, -1);
-    // 标签按 clean 对齐，函数尾部映射回原始 src 行号（见 return 前）
+    // 标签按 clean 对齐（长度 = 剔除非有限点后的点数，clean 点 j 对应 src 行 global[j]），
+    // 函数尾部仅按簇大小降序编号，**不回映射到 src 行号**——调用方如需原始行号须自行经 global
+    // 映射（见 fitInputClean；Point3DAlg 封装层即按此契约做映射）。
 
     // 1) 半径搜索缓存每个点的邻居，并标记核心点（含自身的邻居数 >= min_points）
     typename pcl::search::KdTree<PointT>::Ptr tree(new pcl::search::KdTree<PointT>);
@@ -1681,7 +1732,8 @@ int CloudProcessor<PointT>::segmentPlanesMulti(const CloudConstPtr& src,
 template <typename PointT>
 bool CloudProcessor<PointT>::registICP_PointToPoint(const CloudConstPtr& source, const CloudConstPtr& target,
                                                     double max_dist, float out_transform[16],
-                                                    const float* init_transform)
+                                                    const float* init_transform,
+                                                    int max_iteration)
 {
     if (!source || !target)
         return false;
@@ -1689,6 +1741,8 @@ bool CloudProcessor<PointT>::registICP_PointToPoint(const CloudConstPtr& source,
     icp.setInputSource(source);
     icp.setInputTarget(target);
     icp.setMaxCorrespondenceDistance((float)max_dist);
+    if (max_iteration > 0)
+        icp.setMaximumIterations(max_iteration);
     pcl::PointCloud<PointT> aligned;
     if (init_transform) {
         Eigen::Matrix4f init;
@@ -2008,6 +2062,61 @@ bool CloudProcessor<PointT>::registInformationMatrix(const CloudConstPtr& source
         for (int c = 0; c < 6; ++c)
             out_information[r * 6 + c] = M(r, c);
     return true;
+}
+
+template <typename PointT>
+bool CloudProcessor<PointT>::registMultiscaleICP(const CloudConstPtr& source, const CloudConstPtr& target,
+                                                 const std::vector<double>& voxel_sizes,
+                                                 const std::vector<int>& iters,
+                                                 double max_dist_factor, float out_transform[16],
+                                                 const float* init_transform)
+{
+    if (!source || !target || source->empty() || target->empty())
+        return false;
+    const double factor = max_dist_factor > 0.0 ? max_dist_factor : 1.5;
+
+    // 金字塔由粗到细：每级对原始点云独立下采样（Open3D multiscale_icp 语义），
+    // 上一级 final 作下一级 init（PCL align(init) 的 final 已含 init，直接链式传递）。
+    bool haveInit = init_transform != nullptr;
+    float initBuf[16] = { 0 };
+    if (init_transform)
+        std::copy(init_transform, init_transform + 16, initBuf);
+
+    // 空金字塔 = 原始云上的单级 ICP（对应距离 = factor；factor<=0 无法确定距离，拒绝）
+    if (voxel_sizes.empty()) {
+        if (!(max_dist_factor > 0.0))
+            return false;
+        float singleT[16];
+        if (!registICP_PointToPoint(source, target, factor, singleT,
+                                    haveInit ? initBuf : nullptr))
+            return false;
+        std::copy(singleT, singleT + 16, out_transform);
+        return true;
+    }
+
+    for (size_t lv = 0; lv < voxel_sizes.size(); ++lv) {
+        const double voxel = voxel_sizes[lv];
+        if (!(voxel > 0.0))
+            return false;
+        const int it = lv < iters.size() ? iters[lv]
+                                         : (iters.empty() ? 0 : iters.back());
+        CloudPtr srcDown = filterVoxelGrid(source, voxel);
+        CloudPtr tgtDown = filterVoxelGrid(target, voxel);
+        if (!srcDown || !tgtDown || srcDown->empty() || tgtDown->empty())
+            return false;
+        float levelT[16];
+        if (!registICP_PointToPoint(srcDown, tgtDown, factor * voxel, levelT,
+                                    haveInit ? initBuf : nullptr, it))
+            return false;
+        // 下一级以本级结果为初值；末级结果即最终变换（行主序 float[16]）
+        if (lv == voxel_sizes.size() - 1) {
+            std::copy(levelT, levelT + 16, out_transform);
+            return true;
+        }
+        std::copy(levelT, levelT + 16, initBuf);
+        haveInit = true;
+    }
+    return false;
 }
 
 // ---------------- tree ----------------

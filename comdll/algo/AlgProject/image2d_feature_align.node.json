@@ -1,0 +1,98 @@
+{
+  "node": {
+    "id": "alg.image2d.feature_align",
+    "name": "特征对位",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "特征链路一站式对位（ORBAlign 泛化版）：内部串联 FAST 检测→描述子(ORB/BRISK/AKAZE/SIFT)→Lowe 比率匹配→RANSAC 几何估计（部分仿射 4DOF/单应 8DOF）；输出匹配连线标注，变换矩阵/内点数/匹配对数并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiFeatureAlign",
+  "inputs": [
+    {
+      "name": "基准图",
+      "type": "image"
+    },
+    {
+      "name": "待对位图",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "type",
+      "label": "描述子类型",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "description": "0=ORB(二进制,最快) 1=BRISK(二进制) 2=AKAZE(二进制) 3=SIFT(浮点128维,最稳)；两图使用同类型"
+    },
+    {
+      "name": "n_features",
+      "label": "特征点上限",
+      "type": "int",
+      "default": 500,
+      "min": 50,
+      "max": 2000,
+      "description": "仅 ORB 有效（同 ORBAlign）；其他类型忽略"
+    },
+    {
+      "name": "ratio",
+      "label": "Lowe比率",
+      "type": "number",
+      "default": 0.7,
+      "min": 0.1,
+      "max": 0.9,
+      "description": "Lowe 比率测试系数（越大匹配越多、误配也随之增多）"
+    },
+    {
+      "name": "motion",
+      "label": "运动模型",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "0=部分仿射 4DOF（旋转+等比缩放+平移，约束强抗误配，工业对位推荐） 1=单应 8DOF（平面/大视角透视）"
+    },
+    {
+      "name": "ransac_threshold",
+      "label": "RANSAC阈值(px)",
+      "type": "number",
+      "default": 3.0,
+      "min": 0.1,
+      "max": 100,
+      "description": "RANSAC 重投影阈值（像素，典型 3.0；内点数 >= 10 视为可靠）"
+    },
+    {
+      "name": "fast_threshold",
+      "label": "FAST阈值",
+      "type": "int",
+      "default": 20,
+      "min": 1,
+      "max": 255,
+      "description": "内部 FAST 检测的灰度差阈值（典型 10~40；特征过密/误配时调大）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

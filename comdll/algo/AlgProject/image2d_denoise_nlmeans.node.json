@@ -1,0 +1,76 @@
+{
+  "node": {
+    "id": "alg.image2d.denoise_nlmeans",
+    "name": "非局部均值降噪",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "NLMeans 非局部均值降噪：搜索窗内找相似块加权平均去高斯白噪声，孤立噪声点权重趋 0、结构块权重高——保细节优于局部滤波（1/3ch 分别走 fastNlMeansDenoising/Colored，4ch 拆 BGR 后回贴 alpha）；h 越大去噪越强、细节损失越多；search_window 越大越慢"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiDenoiseNLMeans",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "h",
+      "label": "亮度强度",
+      "type": "number",
+      "default": 3.0,
+      "min": 0.1,
+      "max": 100,
+      "description": "亮度分量滤波强度（常用 3~10；大 = 去噪强但细节损失多）"
+    },
+    {
+      "name": "h_color",
+      "label": "彩色强度",
+      "type": "number",
+      "default": 3.0,
+      "min": 0.1,
+      "max": 100,
+      "description": "彩色分量强度（仅 3/4 通道生效，通常 = h）"
+    },
+    {
+      "name": "template_window",
+      "label": "模板窗",
+      "type": "int",
+      "default": 7,
+      "min": 3,
+      "max": 15,
+      "description": "模板窗边长（奇数；偶数/过小自动补奇，下限 3）"
+    },
+    {
+      "name": "search_window",
+      "label": "搜索窗",
+      "type": "int",
+      "default": 21,
+      "min": 5,
+      "max": 51,
+      "description": "搜索窗边长（奇数；须 > 模板窗，偶数自动补奇；性能随其线性下降）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

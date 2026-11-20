@@ -1,0 +1,116 @@
+{
+  "node": {
+    "id": "alg.image2d.find_matches_roi",
+    "name": "多目标模板匹配ROI",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "仅在 ROI 内提取多目标（NMS 在 ROI 内进行，命中坐标平移回全图系）：限区搜索省时并屏蔽区外干扰，Mark 阵列区域全检"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiFindMatchesRoi",
+  "inputs": [
+    {
+      "name": "搜索图",
+      "type": "image"
+    },
+    {
+      "name": "模板",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "roi_x",
+      "label": "ROI X",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "ROI 左上角 X"
+    },
+    {
+      "name": "roi_y",
+      "label": "ROI Y",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "ROI 左上角 Y"
+    },
+    {
+      "name": "roi_w",
+      "label": "ROI 宽(0全图)",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "ROI 宽（<=0 = 全图，同 find_matches）"
+    },
+    {
+      "name": "roi_h",
+      "label": "ROI 高(0全图)",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "ROI 高（<=0 = 全图）"
+    },
+    {
+      "name": "method",
+      "label": "匹配方法",
+      "type": "int",
+      "default": 5,
+      "min": 0,
+      "max": 5,
+      "description": "cv::TemplateMatchModes（5=CCOEFF_NORMED 归一化相关）"
+    },
+    {
+      "name": "score_threshold",
+      "label": "得分阈值",
+      "type": "number",
+      "default": 0.8,
+      "min": 0,
+      "max": 1,
+      "description": "SQDIFF 系 = 得分<=阈值命中，其余 = >=阈值"
+    },
+    {
+      "name": "max_matches",
+      "label": "最多输出数",
+      "type": "int",
+      "default": 10,
+      "min": 1,
+      "max": 100,
+      "description": "最多输出目标数（按得分从优到劣）"
+    },
+    {
+      "name": "nms_radius",
+      "label": "NMS半径",
+      "type": "int",
+      "default": 5,
+      "min": 0,
+      "max": 100,
+      "description": "非极大值抑制半径（像素，ROI 内）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

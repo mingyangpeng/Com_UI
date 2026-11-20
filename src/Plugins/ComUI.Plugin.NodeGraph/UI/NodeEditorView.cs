@@ -66,9 +66,10 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
     private readonly Dictionary<string, Button> _previewExportButtons = new();
     private readonly Dictionary<string, TextBox> _previewNameBoxes = new();   // draw 卡片变量名框（默认名跟随输入）
 
-    private enum DragMode { None, Pan, Node, Connect, Resize, ScopeSelect, EdgeBend, ScopeMove, ScopeResize }
+    private enum DragMode { None, Pan, Node, Connect, Resize, ScopeSelect, Marquee, EdgeBend, ScopeMove, ScopeResize }
     private Point _scopeStart;          // 框选起点（世界坐标）
     private Rectangle? _rubberBand;     // 框选橡皮筋（临时）
+    private readonly HashSet<string> _selectedNodes = new();   // 左键框选的多选集合（卡片蓝框高亮）
 
     // 连线形状拖动：在按下处插入/命中锚点，拖动该锚点实现局部变形（端点不变）
     private Connection? _bendEdge;
@@ -84,6 +85,8 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
     private DragMode _mode = DragMode.None;
     private double _resizeStartW;   // Resize 按压时的卡片宽（增量基于起点；ComfyUI 式仅宽度可拉）
     private Point _lastScreen;
+    private bool _panLogged;        // 中键平移诊断：每次拖动只记一次日志
+    private bool _ctrlDown;         // 按住 Ctrl = 平移模式（Ctrl+左键拖动平移画布，触摸板友好；仅用于手型光标提示）
     private string? _dragNode;
     private (string Node, string Port, PortType Type)? _pending;
     private Path? _tempEdge;
@@ -123,6 +126,7 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
     public Func<IReadOnlyList<string>>? GroupSource { get; set; }
     private readonly DispatcherTimer _debounce;
     private CancellationTokenSource? _runCts;
+    private bool _fitViewPending;   // 打开流水线后待适配视野：视口布局就绪时执行一次
 
     private static readonly Brush Hairline = new SolidColorBrush(Color.FromArgb(0x26, 0xFF, 0xFF, 0xFF));
     private static readonly Brush DimText = new SolidColorBrush(Color.FromRgb(0x9D, 0x9D, 0x9D));
@@ -141,6 +145,12 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
         _world.Children.Add(_tempLayer);
         _tempLayer.IsHitTestVisible = false;
         _world.Children.Add(_nodesLayer);
+        // 关键：Avalonia 的 RenderTransformOrigin 默认是元素中心(50%,50%)，缩放会绕 _world 中心进行，
+        // 但本类所有坐标公式（FitAll/滚轮缩放/中键平移/坐标反算）都假设绕原点(0,0)：
+        //     screen = world * scale + translate
+        // 若留默认值，缩放中心偏移会让平移被抵消——表现就是点\"视野内\"后卡片整体跑出视口\"消失\"。
+        // 显式设为 0,0 使实际变换与公式严格一致。
+        _world.RenderTransformOrigin = new RelativePoint(0, 0, RelativeUnit.Relative);
         _world.RenderTransform = new TransformGroup { Children = { _scaleT, _transT } };
 
         _editor = new Border
@@ -157,9 +167,33 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
         root.Children.Add(_editor);
         Content = root;
 
+        // 布局就绪后若有待办视野适配（打开流水线时登记），执行一次。
+        // 打开瞬间 _editor.Bounds 可能为 0，FitAll 会早退；LayoutUpdated 保证视口尺寸有效后再适配。
+        LayoutUpdated += (_, _) =>
+        {
+            if (!_fitViewPending) return;
+            if (_editor.Bounds.Width <= 0 || _editor.Bounds.Height <= 0) return;
+            _fitViewPending = false;   // 一次性：只适配一次，之后用户可自由平移缩放
+            FitAllNodesInView();
+        };
+
+        // Ctrl 按住状态：仅用于手型光标提示；松开/失焦必须清掉，避免光标卡在 Hand
+        // 真正的平移判定在 EditorPressed 里直接读 e.KeyModifiers.Control，不依赖此状态（更可靠）
+        KeyUp += (_, e) =>
+        {
+            if (e.Key is Key.LeftCtrl or Key.RightCtrl) { _ctrlDown = false; _editor.Cursor = Cursor.Default; }
+        };
+        LostFocus += (_, _) => { _ctrlDown = false; _editor.Cursor = Cursor.Default; };   // 切走焦点时兜底复位
+
         // Ctrl+S = 保存（已加载文件直接写回；新页面弹另存对话框；锁定页复制副本）
         KeyDown += (_, e) =>
         {
+            // 按住 Ctrl：光标变手型提示可平移（Ctrl 组合键仍需照常处理，不 return）
+            if (e.Key is Key.LeftCtrl or Key.RightCtrl && !_ctrlDown)
+            {
+                _ctrlDown = true;
+                _editor.Cursor = new Cursor(StandardCursorType.Hand);
+            }
             if (e.Key == Key.S && e.KeyModifiers.HasFlag(KeyModifiers.Control))
             {
                 e.Handled = true;
@@ -199,40 +233,73 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
                 if (fromNode is not null && toNode is not null)
                     _log($"删除连线「{NodeDefs.Map[fromNode.DefId].Name} → {NodeDefs.Map[toNode.DefId].Name}」");
             }
+            else if (e.Key == Key.Delete && !e.Handled && !_readOnly && _selectedNodes.Count > 1)
+            {
+                // 框选多选：一次删除全部（先清空集合与选中态，避免删节点时逐个触发残留高亮）
+                e.Handled = true;
+                var ids = _selectedNodes.ToList();
+                _selectedNodes.Clear();
+                SelectCard(null);
+                int n = 0;
+                foreach (var id in ids) { DeleteNode(id); n++; }
+                _log($"已删除框选的 {n} 个算子卡片");
+            }
             else if (e.Key == Key.Delete && !e.Handled && !_readOnly && _selectedNode is { } sel)
             {
                 e.Handled = true;
                 SelectCard(null);
                 DeleteNode(sel);
             }
-            else if (e.Key == Key.C && e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.Handled
-                     && _selectedNode is { } cp && e.Source is not TextBox)
+            else if (e.Key == Key.A && e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.Handled
+                     && e.Source is not TextBox)
             {
-                var src = _graph.FindNode(cp);
-                if (src is null) return;
+                // Ctrl+A：全选所有算子卡片（框选多选的键盘快捷方式）
                 e.Handled = true;
-                _clipNode = _graph.CopyNodeToJson(cp);
+                SelectAllNodes();
+            }
+            else if (e.Key == Key.C && e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.Handled
+                     && e.Source is not TextBox)
+            {
+                // 多选优先：框选/Ctrl+A 的整组一起复制；否则退回主选中单节点
+                var ids = (_selectedNodes.Count > 0
+                    ? _selectedNodes.ToList()
+                    : (_selectedNode is not null ? new List<string> { _selectedNode } : new List<string>()))
+                    .Where(id => _graph.FindNode(id) is not null).Distinct().ToList();
+                if (ids.Count == 0) return;
+                e.Handled = true;
+                _clipNode = _graph.CopyNodesToJson(ids);
                 _pasteSeq = 0;
-                _log($"已复制节点「{NodeDefs.Map[src.DefId].Name}」——Ctrl+V 粘贴副本");
+                _log(ids.Count > 1
+                    ? $"已复制 {ids.Count} 个节点——Ctrl+V 粘贴整组（含组内连线）"
+                    : $"已复制节点「{NodeDefs.Map[_graph.FindNode(ids[0])!.DefId].Name}」——Ctrl+V 粘贴副本");
             }
             else if (e.Key == Key.V && e.KeyModifiers.HasFlag(KeyModifiers.Control) && !e.Handled
                      && _clipNode is not null && !_readOnly && e.Source is not TextBox)
             {
                 e.Handled = true;
                 _pasteSeq++;
-                if (_graph.PasteNode(_clipNode, 24 * _pasteSeq, 24 * _pasteSeq) is not { } pasted) return;
-                BuildCard(pasted, NodeDefs.Map[pasted.DefId]);
-                SelectCard(pasted.Id);
+                var pasted = _graph.PasteNodes(_clipNode, 24 * _pasteSeq, 24 * _pasteSeq);
+                if (pasted.Count == 0) return;
+                foreach (var n in pasted)
+                    BuildCard(n, NodeDefs.Map[n.DefId]);
+                RedrawEdges();   // 组内连线也要画出来（单节点粘贴时为空，零开销）
+                // 粘贴出的整组成为新的当前选中：单节点走单选，多节点走多选高亮
+                if (pasted.Count == 1) SelectCard(pasted[0].Id);
+                else SetMultiSelection(pasted.Select(n => n.Id));
                 ScheduleAutoRun();
-                _log($"已粘贴节点「{NodeDefs.Map[pasted.DefId].Name}」");
+                _log(pasted.Count > 1
+                    ? $"已粘贴 {pasted.Count} 个节点（含组内连线）"
+                    : $"已粘贴节点「{NodeDefs.Map[pasted[0].DefId].Name}」");
             }
         };
 
         // 画布平移 / 缩放
-        _editor.PointerPressed += EditorPressed;
+        // 用 handledEventsToo 保证即使按在卡片/端口/参数 TextBox 上（子控件已把事件
+        // 标记 Handled），按压/移动/释放仍能冒泡到 _editor / this，中键平移不失效。
+        _editor.AddHandler(PointerPressedEvent, EditorPressed, RoutingStrategies.Bubble, true);
         _editor.PointerWheelChanged += EditorWheel;
-        PointerMoved += OnPointerMoved;
-        PointerReleased += OnPointerReleased;
+        AddHandler(PointerMovedEvent, OnPointerMoved, RoutingStrategies.Bubble, true);
+        AddHandler(PointerReleasedEvent, OnPointerReleased, RoutingStrategies.Bubble, true);
 
         // 端口锚点依赖布局：卡片尺寸变化（如预览区出现）/标签激活后的首次布局都要补画连线
         _world.LayoutUpdated += (_, _) =>
@@ -269,8 +336,27 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
         });
     }
 
+    /// <summary>释放 draw 卡片内嵌的 3D 预览控件（每个持有一个 GL 上下文）。
+    /// 必须在任何会丢弃卡片的路径调用：删除节点/重建全部/清空/销毁视图，
+    /// 否则每次运行或重开流水线都会泄漏一个 GL 上下文，累积到驱动上限后新预览创建失败（显示"无 GL 上下文"）。</summary>
+    private void DisposePreview(string nodeId)
+    {
+        if (_previewSlots.Remove(nodeId, out var slot))
+        {
+            try { slot.Cloud?.Dispose(); } catch { }
+            slot.Cloud = null;
+        }
+    }
+
+    private void DisposeAllPreviews()
+    {
+        foreach (var id in _previewSlots.Keys.ToList()) DisposePreview(id);
+    }
+
     public void Dispose()
     {
+        DisposeAllPreviews();   // 释放所有内嵌 3D 预览的 GL 上下文（随标签页关闭）
+
         // 视图销毁时若仍在全屏，恢复窗口并解绑 Esc 监听，避免残留
         if (_fullscreenWindow is { } win)
         {
@@ -370,15 +456,6 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
         fullBtn.Click += (_, _) => ToggleFullscreen();
         bar.Children.Add(fullBtn);
 
-        bar.Children.Add(new TextBlock
-        {
-            Text = "算子库：单击选中，再单击加入画布 · 拖端口连线 · 右击空白处拖框=设循环作用域（框内含循环算子）· Del/右击节点删除 · 滚轮缩放",
-            VerticalAlignment = VerticalAlignment.Center,
-            FontSize = 11,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x7C)),
-            Margin = new Thickness(6, 0, 0, 0),
-        });
-
         return new Border
         {
             Background = new SolidColorBrush(Color.FromRgb(0x23, 0x23, 0x26)),
@@ -444,28 +521,46 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
         if (_graph.Nodes.Count == 0) { _log("画布为空，无需调整视野"); return; }
         double minX = double.MaxValue, minY = double.MaxValue;
         double maxX = double.MinValue, maxY = double.MinValue;
+        int counted = 0, skipped = 0;
         foreach (var n in _graph.Nodes)
         {
-            // 卡片实际布局高度优先（内容自适应），未布局时用估算高度
+            // 过滤 NaN/Inf 坐标：单个坏节点会把整个包围盒污染成 NaN → scale=NaN → 画布渲染异常
+            if (!double.IsFinite(n.X) || !double.IsFinite(n.Y)) { skipped++; continue; }
+            // card.Bounds 是未经 RenderTransform 的布局尺寸，与 n.X/n.Y 同为世界坐标单位
             double w = _cards.TryGetValue(n.Id, out var card) && card.Bounds.Width > 0 ? card.Bounds.Width : (n.Width ?? AutoCardWidth(NodeDefs.Map[n.DefId]));
             double h = _cards.TryGetValue(n.Id, out var c2) && c2.Bounds.Height > 0 ? c2.Bounds.Height : 160;
+            if (!double.IsFinite(w) || w <= 0) w = CardW;
+            if (!double.IsFinite(h) || h <= 0) h = 160;
             minX = Math.Min(minX, n.X);
             minY = Math.Min(minY, n.Y);
             maxX = Math.Max(maxX, n.X + w);
             maxY = Math.Max(maxY, n.Y + h);
+            counted++;
         }
+        if (counted == 0 || !double.IsFinite(minX)) { _log("节点坐标无效，无法计算视野"); return; }
         var vp = _editor.Bounds;
         if (vp.Width <= 0 || vp.Height <= 0) { _log("视口尚未就绪，请稍后再试"); return; }
 
         double contentW = Math.Max(1, maxX - minX), contentH = Math.Max(1, maxY - minY);
-        double scale = Math.Min(vp.Width / contentW, vp.Height / contentH) * 0.92;
-        scale = Math.Clamp(scale, 0.35, 2.5);
+        const double margin = 0.92;
+        double scale = Math.Min(vp.Width / contentW, vp.Height / contentH) * margin;
+        // 关键：Fit-to-view 只负责"把内容全部纳入视野"，不该放大超过 1:1。
+        // 上限 2.5 会把单个小卡片（如 t1 的 204px 宽）放大 2.5 倍，卡片被推到视口外 → 看似"消失"。
+        // 上限设为 1.0：内容小则保持原尺寸居中，内容大则缩小适配。
+        scale = Math.Clamp(scale, 1e-4, 1.0);
+        // 自我校正：中心对齐时内容占屏 = content*scale，必须 <= 视口*margin。
+        // 若被 clamp 下限卡住（有节点被拖到极远处、所需 scale 极小），这里强制回退到能全部落入的值。
+        if (contentW * scale > vp.Width * margin || contentH * scale > vp.Height * margin)
+            scale = Math.Min(vp.Width * margin / contentW, vp.Height * margin / contentH);
         _scaleT.ScaleX = _scaleT.ScaleY = scale;
-        // 让内容中心对齐视口中心
         double cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
         _transT.X = vp.Width / 2 - cx * scale;
         _transT.Y = vp.Height / 2 - cy * scale;
-        _log($"视野已调整：{_graph.Nodes.Count} 个节点全部落入视口（缩放 {scale:F2}×）");
+        // 诊断：按变换公式推算内容最终落在视口的屏幕矩形（screen = world*scale + trans）
+        double sx0 = minX * scale + _transT.X, sy0 = minY * scale + _transT.Y;
+        double sx1 = maxX * scale + _transT.X, sy1 = maxY * scale + _transT.Y;
+        _log($"视野已调整：{counted} 个节点（内容 {contentW:F0}×{contentH:F0}，视口 {vp.Width:F0}×{vp.Height:F0}，缩放 {scale:F3}×，屏幕矩形 ({sx0:F0},{sy0:F0})-({sx1:F0},{sy1:F0})）" +
+             (skipped > 0 ? $"，跳过 {skipped} 个坐标无效节点" : ""));
     }
 
     /// <summary>切换_fullscreen：本视图所在窗口进入全屏；Esc 退出并恢复原窗口状态。</summary>
@@ -522,10 +617,30 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
 
     private void EditorPressed(object? sender, PointerPressedEventArgs e)
     {
+        // 中键：无论按在画布空白、卡片头部、端口还是参数 TextBox 上，一律进入画布平移。
+        // 必须放在 e.Handled 判断之前——子控件经常把中键按压标记为已处理。
+        // 关键：这里不设置 e.Handled。之前"隧道 + Handled"方案之所以按下无反应/拖动失效，
+        // 是因为标记 Handled 后 Avalonia 不再把后续 PointerMoved 路由到捕获元素。
+        var pressProps = e.GetCurrentPoint(_editor).Properties;
+        bool ctrlPan = e.KeyModifiers.HasFlag(KeyModifiers.Control) && pressProps.IsLeftButtonPressed;
+        if (pressProps.IsMiddleButtonPressed || ctrlPan)
+        {
+            // 中键拖动 或 Ctrl+左键拖动 = 平移画布（任意位置，含卡片/端口/输入框上）
+            // 直接读 e.KeyModifiers 判定 Ctrl，不依赖 KeyDown 状态（焦点在别处时也能平移）
+            _mode = DragMode.Pan;
+            _lastScreen = e.GetPosition(this);
+            _panLogged = false;
+            e.Pointer.Capture(this);
+            e.Handled = true;   // 吞掉按压，避免 Ctrl+左键同时触发卡片选中/连线
+            _editor.Focus();
+            _log($"平移开始（{(pressProps.IsMiddleButtonPressed ? "中键" : "Ctrl+左键")}，源={e.Source?.GetType().Name ?? "null"}）");
+            return;
+        }
         // 连线等子元素已 Handled 的事件不处理，避免冒泡到这里把刚选中的连线又清空
         if (e.Handled) return;
         SelectCard(null);
         SelectEdge(null);   // 点画布空白同时取消连线选中（内部去重，无选中时零开销）
+        ClearMultiSelect(); // 点空白清空框选多选（把卡片蓝框恢复）
         if (_editScope is not null)   // 退出作用域编辑态
         {
             _editScope = null;
@@ -545,13 +660,14 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
             e.Handled = true;
             _editor.Focus();
         }
-        else if (props.IsMiddleButtonPressed || (props.IsLeftButtonPressed && onBackground))
+        else if (props.IsLeftButtonPressed && onBackground)
         {
-            _mode = DragMode.Pan;
-            _lastScreen = e.GetPosition(this);
+            // 左键空白拖动 = 框选区域选中多个算子卡片
+            _mode = DragMode.Marquee;
+            _scopeStart = e.GetPosition(_world);
             e.Pointer.Capture(this);
             e.Handled = true;
-            if (onBackground) _editor.Focus();
+            _editor.Focus();
         }
     }
 
@@ -559,7 +675,7 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
     {
         double old = _scaleT.ScaleX;
         double factor = e.Delta.Y > 0 ? 1.15 : 1 / 1.15;
-        double @new = Math.Clamp(old * factor, 0.35, 2.5);
+        double @new = Math.Clamp(old * factor, 0.03, 2.5);
         if (Math.Abs(@new - old) < 0.001) return;
 
         var mouse = e.GetPosition(_editor);
@@ -580,6 +696,11 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
                 _transT.X += p.X - _lastScreen.X;
                 _transT.Y += p.Y - _lastScreen.Y;
                 _lastScreen = p;
+                if (!_panLogged)
+                {
+                    _panLogged = true;
+                    _log($"中键平移生效：平移量=({_transT.X:F0},{_transT.Y:F0})");
+                }
                 break;
             }
             case DragMode.Node when _dragNode is not null:
@@ -588,12 +709,18 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
                 double dx = (p.X - _lastScreen.X) / _scaleT.ScaleX;
                 double dy = (p.Y - _lastScreen.Y) / _scaleT.ScaleY;
                 _lastScreen = p;
-                var n = _graph.FindNode(_dragNode)!;
-                n.X += dx; n.Y += dy;
-                if (_cards.TryGetValue(n.Id, out var card))
+                // 多选：拖其中一个 → 框选集合内所有卡片一起移动（主节点也在集合内）
+                var moveIds = _selectedNodes.Count > 1 && _selectedNodes.Contains(_dragNode)
+                    ? _selectedNodes.ToList() : new List<string> { _dragNode };
+                foreach (var id in moveIds)
                 {
-                    Canvas.SetLeft(card, n.X);
-                    Canvas.SetTop(card, n.Y);
+                    var n = _graph.FindNode(id)!;
+                    n.X += dx; n.Y += dy;
+                    if (_cards.TryGetValue(id, out var card))
+                    {
+                        Canvas.SetLeft(card, n.X);
+                        Canvas.SetTop(card, n.Y);
+                    }
                 }
                 RedrawEdges();
                 break;
@@ -660,17 +787,21 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
                 break;
             }
             case DragMode.ScopeSelect:
+            case DragMode.Marquee:
             {
                 var w = e.GetPosition(_world);
                 double x = Math.Min(_scopeStart.X, w.X), y = Math.Min(_scopeStart.Y, w.Y);
                 double width = Math.Abs(w.X - _scopeStart.X), height = Math.Abs(w.Y - _scopeStart.Y);
                 _tempLayer.Children.Clear();
+                bool marquee = _mode == DragMode.Marquee;
                 _rubberBand = new Rectangle
                 {
-                    Stroke = new SolidColorBrush(Color.FromRgb(0x7F, 0x77, 0xDD)),
+                    Stroke = new SolidColorBrush(marquee
+                        ? Color.FromRgb(0x0A, 0x84, 0xFF) : Color.FromRgb(0x7F, 0x77, 0xDD)),
                     StrokeThickness = 1.5,
-                    StrokeDashArray = new AvaloniaList<double> { 5, 3 },
-                    Fill = new SolidColorBrush(Color.FromArgb(0x18, 0x7F, 0x77, 0xDD)),
+                    StrokeDashArray = marquee ? null : new AvaloniaList<double> { 5, 3 },
+                    Fill = new SolidColorBrush(marquee
+                        ? Color.FromArgb(0x20, 0x0A, 0x84, 0xFF) : Color.FromArgb(0x18, 0x7F, 0x77, 0xDD)),
                     IsHitTestVisible = false,
                 };
                 Canvas.SetLeft(_rubberBand, x);
@@ -694,6 +825,17 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
             _rubberBand = null;
             if (width > 20 && height > 20)
                 ApplyScopeRect(new ScopeRect { X = x, Y = y, W = width, H = height });
+        }
+        else if (_mode == DragMode.Marquee)
+        {
+            var w = e.GetPosition(_world);
+            double x = Math.Min(_scopeStart.X, w.X), y = Math.Min(_scopeStart.Y, w.Y);
+            double width = Math.Abs(w.X - _scopeStart.X), height = Math.Abs(w.Y - _scopeStart.Y);
+            _tempLayer.Children.Clear();
+            _rubberBand = null;
+            // 有效框（>6px）才多选；单击空白不框选（EditorPressed 已清空选中）
+            if (width > 6 && height > 6)
+                ApplyMarqueeSelect(x, y, width, height);
         }
         else if (_mode == DragMode.Connect && _pending is not null)
         {
@@ -931,6 +1073,7 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
                 return;
             }
             if (!props.IsLeftButtonPressed) return;
+            if (e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;   // Ctrl+左键 = 平移画布，不拖动本卡片
             // 450ms 内两次左键 = 行内改名（Sdk.Ui.DoubleClickDetector，每卡独立实例避免跨卡误判）
             if (dbl.IsDouble())
             {
@@ -944,9 +1087,16 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
             e.Pointer.Capture(this);
             e.Handled = true;
             RaiseCard(node.Id);
+            // 多选组内卡片：保留整组选中态以支持整组拖动；组外卡片才回退单选（清掉多选高亮）
+            if (_selectedNodes.Count > 1 && _selectedNodes.Contains(node.Id))
+            {
+                _selectedNode = node.Id;   // 主选中切到拖动的卡片，属性面板同步
+                RefreshNodeProps();
+                PushNodeToProps();
+            }
+            else SelectCard(node.Id);
             // 头部按压=拖动会标记 Handled，卡片级处理器的聚焦条件（!e.Handled）因此失败——
             // 键盘焦点必须在这里补上，否则点标题栏后 Ctrl+C/V/Del 全部不可达（复制失效的根因）
-            SelectCard(node.Id);
             if (_cards.TryGetValue(node.Id, out var selfCard)) selfCard.Focus();
         };
 
@@ -1130,7 +1280,11 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
         // 任意位置按下=选中（handledEventsToo：头部把 Pressed 标记 Handled 用于拖动/改名，这里也要收到）
         card.AddHandler(PointerPressedEvent, (_, e) =>
         {
-            SelectCard(node.Id);
+            // 中键/Ctrl+左键交给画布平移，不改卡片选中态（本处理器 handledEventsToo 会收到，直接跳过）
+            if (e.GetCurrentPoint(card).Properties.IsMiddleButtonPressed || e.KeyModifiers.HasFlag(KeyModifiers.Control)) return;
+            // 多选组内卡片按下不清多选（配合 header 的整组拖动）；组外卡片才回退单选
+            if (!(_selectedNodes.Count > 1 && _selectedNodes.Contains(node.Id)))
+                SelectCard(node.Id);
             // 只在"无控件处理过该按压"时才把键盘焦点交给卡片（Del 删除可达）。
             // 不能只判 e.Source 类型：TextBox/Button 是模板控件，e.Source 是其模板内元素，
             // 误抢焦点会打断输入框光标和按钮点击（导入失效的根因）。
@@ -1448,14 +1602,105 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
 
     private void SelectCard(string? nodeId)
     {
-        if (_selectedNode == nodeId) return;
+        if (_selectedNode == nodeId && _selectedNodes.Count == 0) return;
         if (_selectedNode is { } prev && _cards.TryGetValue(prev, out var prevCard))
             prevCard.BorderBrush = new SolidColorBrush(Color.FromRgb(0x3F, 0x3F, 0x44));
         _selectedNode = nodeId;
-        if (nodeId is { } id && _cards.TryGetValue(id, out var card))
+        // 单选卡片即取消框选多选，并清掉多选残留高亮
+        if (_selectedNodes.Count > 0)
+        {
+            foreach (var id in _selectedNodes)
+                if (_cards.TryGetValue(id, out var mc) && id != nodeId)
+                    mc.BorderBrush = new SolidColorBrush(Color.FromRgb(0x3F, 0x3F, 0x44));
+            _selectedNodes.Clear();
+        }
+        if (nodeId is { } selId && _cards.TryGetValue(selId, out var card))
             card.BorderBrush = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF));
         RefreshNodeProps();   // 兼容旧的 IPanelParamsProvider 路径（宿主持有本控件实例时原地刷新）
         PushNodeToProps();    // 统一通道：与算子库共用 PropsShow 总线，确保属性栏一定显示当前节点
+    }
+
+    /// <summary>左键框选完成：矩形与卡片世界矩形相交即选中（ComfyUI 式：碰到即算），蓝框高亮。
+    /// 主选中取框内首节点（属性面板显示），Del 将作用于整个多选集合。</summary>
+    private void ApplyMarqueeSelect(double x, double y, double width, double height)
+    {
+        var sel = new Rect(x, y, width, height);
+        var hits = _graph.Nodes.Where(n =>
+        {
+            double w = _cards.TryGetValue(n.Id, out var c) && c.Bounds.Width > 0
+                ? c.Bounds.Width : (n.Width ?? AutoCardWidth(NodeDefs.Map[n.DefId]));
+            double h = _cards.TryGetValue(n.Id, out var c2) && c2.Bounds.Height > 0
+                ? c2.Bounds.Height : 120;
+            return sel.Intersects(new Rect(n.X, n.Y, w, h));
+        }).ToList();
+
+        ClearMultiSelect();
+        if (hits.Count == 0)
+        {
+            _log("框选区域内没有算子卡片");
+            return;
+        }
+        foreach (var n in hits)
+        {
+            _selectedNodes.Add(n.Id);
+            if (_cards.TryGetValue(n.Id, out var c))
+                c.BorderBrush = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF));
+        }
+        // 主选中设为首节点属性面板可见；多选高亮不被 SelectCard 的早退清掉（直接赋值 + Push）
+        if (_selectedNode is { } old && _cards.TryGetValue(old, out var oc) && !_selectedNodes.Contains(old))
+            oc.BorderBrush = new SolidColorBrush(Color.FromRgb(0x3F, 0x3F, 0x44));
+        _selectedNode = hits[0].Id;
+        RefreshNodeProps();
+        PushNodeToProps();
+        _log($"已框选 {hits.Count} 个算子卡片（Del 删除全部；拖动其中一个一起移动；点空白或单卡片取消）");
+    }
+
+    /// <summary>清空框选多选：所有多选卡片蓝框恢复默认（不动主选中）。</summary>
+    private void ClearMultiSelect()
+    {
+        if (_selectedNodes.Count == 0) return;
+        foreach (var id in _selectedNodes)
+            if (_cards.TryGetValue(id, out var c) && id != _selectedNode)
+                c.BorderBrush = new SolidColorBrush(Color.FromRgb(0x3F, 0x3F, 0x44));
+        _selectedNodes.Clear();
+    }
+
+    /// <summary>把给定节点设为当前多选（粘贴整组后调用）：全部蓝框，主选中取第一个供属性面板显示。</summary>
+    private void SetMultiSelection(IEnumerable<string> ids)
+    {
+        ClearMultiSelect();
+        var list = ids.Where(id => _cards.ContainsKey(id)).ToList();
+        foreach (var id in list)
+        {
+            _selectedNodes.Add(id);
+            _cards[id].BorderBrush = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF));
+        }
+        if (list.Count == 0) return;
+        if (_selectedNode is { } old && _cards.TryGetValue(old, out var oc) && !_selectedNodes.Contains(old))
+            oc.BorderBrush = new SolidColorBrush(Color.FromRgb(0x3F, 0x3F, 0x44));
+        _selectedNode = list[0];
+        RefreshNodeProps();
+        PushNodeToProps();
+    }
+
+    /// <summary>Ctrl+A：全选所有算子卡片，全部蓝框高亮。</summary>
+    private void SelectAllNodes()
+    {
+        ClearMultiSelect();
+        var all = _graph.Nodes.ToList();
+        foreach (var n in all)
+        {
+            _selectedNodes.Add(n.Id);
+            if (_cards.TryGetValue(n.Id, out var c))
+                c.BorderBrush = new SolidColorBrush(Color.FromRgb(0x0A, 0x84, 0xFF));
+        }
+        if (all.Count == 0) return;
+        if (_selectedNode is { } old && _cards.TryGetValue(old, out var oc) && !_selectedNodes.Contains(old))
+            oc.BorderBrush = new SolidColorBrush(Color.FromRgb(0x3F, 0x3F, 0x44));
+        _selectedNode = all[0].Id;
+        RefreshNodeProps();
+        PushNodeToProps();
+        _log($"已全选 {all.Count} 个算子卡片");
     }
 
     /// <summary>
@@ -1518,7 +1763,7 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
         {
             var delBtn = new Button
             {
-                Content = "🗑 删除节点（Del）", Classes = { "ghost" },
+                Content = TrashGlyph.WithText("删除节点（Del）", 13), Classes = { "ghost" },
                 FontSize = 11.5, HorizontalAlignment = HorizontalAlignment.Stretch,
             };
             delBtn.Click += (_, _) => DeleteNode(node.Id);
@@ -1565,7 +1810,7 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
         _nodePropsEditorHost = new StackPanel { Spacing = 6 };
         _nodePropsDeleteBtn = new Button
         {
-            Content = "🗑 删除节点（Del）",
+            Content = TrashGlyph.WithText("删除节点（Del）", 13),
             Classes = { "ghost" },
             FontSize = 11,
             HorizontalAlignment = HorizontalAlignment.Stretch,
@@ -1665,8 +1910,10 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
         var node = _graph.FindNode(nodeId);
         if (node is null) return;
         if (_selectedNode == nodeId) _selectedNode = null;
+        _selectedNodes.Remove(nodeId);
         _log($"删除节点「{NodeDefs.Map[node.DefId].Name}」");
         _graph.RemoveNode(nodeId);
+        DisposePreview(nodeId);   // 释放内嵌 3D 预览的 GL 上下文
         foreach (var k in _portDots.Keys.Where(k => k.NodeId == nodeId).ToList()) _portDots.Remove(k);
         foreach (var k in _paramRefreshers.Keys.Where(k => k.NodeId == nodeId).ToList()) _paramRefreshers.Remove(k);
         if (_cards.Remove(nodeId, out var card)) _nodesLayer.Children.Remove(card);
@@ -1678,6 +1925,7 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
 
     private void ClearAll()
     {
+        DisposeAllPreviews();   // 释放所有内嵌 3D 预览的 GL 上下文
         _graph.Connections.Clear();
         foreach (var n in _graph.Nodes.ToList())
             _graph.RemoveNode(n.Id);
@@ -2406,6 +2654,12 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
         RedrawEdges();
         RedrawScopes();   // 恢复持久化的循环作用域虚线框
         ScheduleAutoRun();
+        // 打开流水线时默认把所有算子卡片纳入视野。
+        // 视口已布局（宽度>0）则立即适配；否则登记待办，等 LayoutUpdated 视口就绪后执行一次。
+        if (_editor.Bounds.Width > 0 && _editor.Bounds.Height > 0)
+            FitAllNodesInView();
+        else
+            _fitViewPending = true;
         _log($"已加载算法: {IOPath.GetFileNameWithoutExtension(path)}{(_graph.Locked ? "（已锁定·只读）" : "")}");
     }
 
@@ -2440,6 +2694,7 @@ public sealed class NodeEditorView : UserControl, IDisposable, IPanelParamsProvi
     /// <summary>重建全部节点卡片（结构批量变化后调用）。</summary>
     private void RebuildAllCards()
     {
+        DisposeAllPreviews();   // 旧卡片连同其内嵌 3D 预览一并丢弃：先释放 GL 上下文再重建
         _nodesLayer.Children.Clear();
         _cards.Clear();
         _dots.Clear();

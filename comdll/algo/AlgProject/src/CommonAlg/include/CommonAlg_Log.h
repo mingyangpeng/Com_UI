@@ -21,21 +21,23 @@
 
 #include <string>
 
+// 日志级别（数值越大越严重；SetLevel 之下的级别被丢弃）
 enum class CommonAlg_LogLevel {
-    Trace = 0,
-    Debug = 1,
-    Info  = 2,
-    Warn  = 3,
-    Error = 4,
+    Trace = 0,   // 最细粒度跟踪（循环内逐条调试）
+    Debug = 1,   // 开发期诊断信息
+    Info  = 2,   // 常规运行信息（默认级别）
+    Warn  = 3,   // 可恢复异常 / 值得注意但不中断
+    Error = 4,   // 操作失败（读取失败 / 打不开文件等）
     Off   = 5,   // 关闭全部日志
 };
 
 // ---------------- 配置 ----------------
 
 /// 设置最低输出级别（低于该级别的日志被丢弃）。
+/// [in] level  新级别（默认 Info；线程安全，可随时调用）
 COMMONALG_EXPORT void CommonAlg_LogSetLevel(CommonAlg_LogLevel level);
 
-/// 当前级别。
+/// 当前级别（即最近一次 SetLevel 的值；未设置时为 Info）。
 COMMONALG_EXPORT CommonAlg_LogLevel CommonAlg_LogGetLevel();
 
 /// 设置日志文件路径（追加写；目录需已存在）。传空串关闭文件输出。

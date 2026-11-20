@@ -1,0 +1,54 @@
+{
+  "node": {
+    "id": "alg.point3d.thickness_map",
+    "name": "厚度图",
+    "group": "3D 点云",
+    "category": "测量",
+    "description": "同一工件上/下表面两点云沿 Z 配对求差（板厚/锡膏厚度测量）：栅格范围取两云 XY 包围盒并集，顶面每格取最高 z、底面每格取最低 z，同格双有效 → 厚度 = zTop - zBottom（负厚度保留不钳制，按消息 min/max 判定数据异常）；输出厚度归一化 8U 灰度图（tmin→0、tmax→255，无效格黑，row 0 = y 最小，与 2D 图像坐标系一致，下游可接 2D 全部图像算子）；尺寸/cell/厚度 min/max/有效率并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiThicknessMap",
+  "inputs": [
+    {
+      "name": "顶面点云",
+      "type": "cloud"
+    },
+    {
+      "name": "底面点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "cell",
+      "label": "栅格边长",
+      "type": "number",
+      "default": 0.1,
+      "min": 0.0001,
+      "max": 1000000,
+      "description": "栅格边长（与点云坐标同单位，>0；总格数上限 2000 万，超出报错）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "厚度图",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

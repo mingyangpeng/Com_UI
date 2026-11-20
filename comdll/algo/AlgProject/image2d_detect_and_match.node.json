@@ -1,0 +1,71 @@
+{
+  "node": {
+    "id": "alg.image2d.detect_and_match",
+    "name": "特征检测匹配",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "一站式特征检测+描述+匹配（type 0=ORB/1=BRISK/2=AKAZE/3=SIFT，检测描述一次完成+BFMatcher 比率匹配）：输出匹配点标注图，匹配对样例并入节点消息；与 feature_align 的边界——本节点不做 RANSAC 几何估计、不输出变换矩阵，需矩阵时接 feature_align 或把匹配对交 estimate_transform 二次求解"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiDetectAndMatch",
+  "inputs": [
+    {
+      "name": "基准图",
+      "type": "image"
+    },
+    {
+      "name": "待对位图",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "type",
+      "label": "特征类型",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "description": "0=ORB(二进制32字节) 1=BRISK(二进制64字节) 2=AKAZE(二进制61字节) 3=SIFT(浮点128维)"
+    },
+    {
+      "name": "n_features",
+      "label": "特征点上限",
+      "type": "int",
+      "default": 500,
+      "min": 50,
+      "max": 2000,
+      "description": "仅 ORB（<=0 取默认 500）/ SIFT（<=0 不限）有效；BRISK/AKAZE 无上限参数，忽略"
+    },
+    {
+      "name": "ratio",
+      "label": "Lowe比率",
+      "type": "number",
+      "default": 0.7,
+      "min": 0.1,
+      "max": 0.9,
+      "description": "Lowe 比率测试阈值（典型 0.7~0.8；越大匹配越多、误配也随之增多）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "标注图",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

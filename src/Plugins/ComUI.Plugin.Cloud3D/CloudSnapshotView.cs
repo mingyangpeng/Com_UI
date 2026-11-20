@@ -73,6 +73,7 @@ public sealed class CloudSnapshotView : UserControl, IDisposable
     private double _dist;
     private Vector3 _target;
     private float _fitRadius = 5;
+    private double _travel;   // 沿视线推进量（穿行），冻结自工作台当时的相机位置
 
     private Point? _orbitLast;
     private Point? _panLast;
@@ -80,13 +81,14 @@ public sealed class CloudSnapshotView : UserControl, IDisposable
 
     private bool HasCloud => _clouds.Count > 0;
 
-    public CloudSnapshotView(IReadOnlyList<SnapEntity> entities, Quaternion orientation, double dist, Vector3 target)
+    public CloudSnapshotView(IReadOnlyList<SnapEntity> entities, Quaternion orientation, double dist, Vector3 target, double travel = 0)
     {
         // 同步上传路径（embed 同款）：多后台 GL worker 共享上下文曾互卡死锁
         _renderer = new GlCloudRenderer(allowBackgroundWorker: false);
         _orientation = orientation;
         _dist = dist;
         _target = target;
+        _travel = travel;
 
         Background = new SolidColorBrush(Color.FromRgb(0x1E, 0x1E, 0x20));
         Focusable = true;
@@ -215,13 +217,17 @@ public sealed class CloudSnapshotView : UserControl, IDisposable
     {
         _orientation = ViewQuat(30, -15);
         _dist = _fitRadius * 2.5f;
+        _travel = 0;
         Draw();
     }
 
     private void OnWheel(object? sender, PointerWheelEventArgs e)
     {
         if (!HasCloud) return;
-        _dist = Math.Clamp(_dist * (e.Delta.Y > 0 ? 0.9 : 1 / 0.9), _fitRadius * 0.05, _fitRadius * 30);
+        // 与工作台一致：滚轮 = 沿视线穿行，上滚前进（可穿过点云到背面），下滚后退。
+        double step = Math.Max(_fitRadius * 0.12, 1e-4);
+        _travel += e.Delta.Y > 0 ? step : -step;
+        _travel = Math.Max(_travel, -_fitRadius * 1.5);
         Draw();
         e.Handled = true;
     }
@@ -329,7 +335,7 @@ public sealed class CloudSnapshotView : UserControl, IDisposable
         int stride = pixels > 0 && visible > pixels ? (int)Math.Ceiling(visible / (double)pixels) : 1;
         stride = Math.Min(stride, 1000);
         _renderer.Draw(_vpW, _vpH, _orientation, (float)(_dist * _scaling), _target, isOrtho,
-            stride, _frame);
+            stride, _frame, 0, (float)(_fitRadius * _scaling), (float)(_travel * _scaling));
 
         using var fb = _wb.Lock();
         nint dst = fb.Address;

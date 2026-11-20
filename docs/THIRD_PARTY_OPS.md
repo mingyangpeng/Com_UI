@@ -31,6 +31,59 @@ comdll/algo/<你的名称>/
 - **参考实现**：`comdll/algo/DemoStitching/`（DLL + `demo.node.json` + `demo.algo.json`），源码在 `src/Plugins/DemoAlgo.Core/`。
 - ⚠️ **热更新注意**：算子 DLL 由宿主用 `Assembly.LoadFrom` 载入**默认上下文**，运行期文件被占用（覆盖会失败），且**不随 F5 卸载** —— 改 DLL 请先退出宿主再覆盖，然后重启（仅改 `node.json` 可 F5 生效）。
 
+### 1.0 alg 源码以 submodule 引入（源码更新不用手动拷贝）
+
+`comdll/algo/alg` 是 git submodule，指向 `https://github.com/mingyangpeng/alg.git` 的 `main` 分支，**只提供源码**（`src/` 与 `integration/comui/*.cpp`）。运行时目录 `comdll/algo/AlgProject` 保持原样：node.json + 本地编译的 DLL + 源码快照，宿主的硬编码路径不变。
+
+- submodule 配置了 `shallow = true` + `filter = blob:none` + 稀疏检出（`src/`、`integration/comui/`），只拉约 7 MB，**不会下载 `thrid/` 下 2 万个第三方源码文件**。
+- DLL 由本地编译产生，**不在 submodule 里**，同步脚本不碰 DLL。
+- submodule 里的 node.json（在 `integration/comui/`）不直接使用；运行时 node.json 始终由本地 `gen_node_json.py` 从 cpp 标注生成（见 §1.1）。
+
+首次初始化 / 日常更新：
+
+```bash
+python tools/sync_alg.py init                       # 首次：注册 submodule + 浅克隆 + 稀疏检出（约 7 MB）
+git -C comdll/algo/alg fetch origin && git -C comdll/algo/alg checkout origin/main   # 日常：更新到远程最新
+
+python tools/sync_alg.py status                      # 查看有哪些源码会变化（只读）
+python tools/sync_alg.py sync --write                # 同步源码到 AlgProject + 重建 node.json + check 校验
+```
+
+`init` 封装了「no-checkout 注册 → 稀疏检出 → checkout」的顺序：直接 `git submodule update --init` 也能用，但会检出 `thrid/` 下 2 万个文件（慢）。filter/shallow 配置在 `.gitmodules`（会提交），稀疏检出在 submodule 本地 `.git/info/`（不提交），所以由 `init` 封装。若本机需代理，先设 git 全局代理再 `init`。
+
+`sync --write` 做四件事：① 拷 `src/**` 和 `integration/comui/{*.cpp,comui_native_abi.h}` 到 AlgProject（本地 cpp 的 `@comui-node` 标注会在第 ② 步恢复）；② `backfill` 从现有 node.json 反向恢复标注；③ `gen` 从标注重新生成 node.json；④ `check` 三方校验。若 alg 新增了导出函数但 node.json 没有声明，`check` 会报未匹配，需人工在 cpp 补标注后重跑 `gen --write`。若只需同步源码不动 node.json，加 `--skip-json`。
+
+### 1.1 从 C++ 标注生成 node.json（批量算子推荐）
+
+大批 native 算子的 `*.node.json` 不必手写：`tools/gen_node_json.py` 把 **C++ 导出函数上方的标注当作单一事实源**，自动生成/校验声明。当前 `AlgProject` 的 83 个算子已全部迁移到标注，可直接用 `check` 守护一致性。
+
+标注写在 `integration/comui/*_comui.cpp` 的导出函数正上方（JSONC）：
+
+```cpp
+// @comui-node-begin
+// {
+//   "node": {"id":"alg.image2d.blur","name":"高斯模糊","group":"2D 图像","category":"处理","description":"..."},
+//   "inputs": [{"name":"输入","type":"image"}],
+//   "params": [{"name":"ksize","label":"核大小","type":"int","default":3,"min":1,"max":31}],
+//   "outputs": [{"name":"输出","type":"image"}],
+//   "source": {"files":[...], "includes":[...]}
+// }
+// @comui-node-end
+IMAGE2DALG_EXPORT int Image2DAlg_ComuiBlur(const AlgoCInput* in, AlgoCOutput* out) {
+```
+
+脚本自动推导的字段（**标注里不要重复写**）：`runtime="native"`、`assembly`（按 cpp 文件名，如 `Image2DAlg_comui.cpp` → `Image2DAlg.dll`）、`method`（标注下方紧邻的导出函数名）、文件名（由 `node.id` 推导，例外用标注里的 `"file"` 指定）。
+
+```bash
+python tools/gen_node_json.py check              # 三方校验：标注 / node.json / 源文件引用（C++ 改了没同步会报错）
+python tools/gen_node_json.py check --params     # 附带参数 kind 数量宽松检查（内联循环读参可能误报）
+python tools/gen_node_json.py gen                # dry-run：报告哪些 node.json 与标注不一致
+python tools/gen_node_json.py gen --write        # 从标注重新生成全部 node.json
+python tools/gen_node_json.py backfill --write   # 仅首次迁移：从已有 node.json 反向注入标注（幂等，已有标注跳过）
+```
+
+**新增 native 算子的标准流程**：写导出函数 → 在上方写标注 → `gen --write` → `check`；无需手工编辑 `node.json`。改动 `node.json` 的语义字段请改标注后重新生成，否则 `check` 会报字段不一致。
+
 ---
 
 ## 2. `*.node.json` 字段规范
@@ -47,7 +100,7 @@ comdll/algo/<你的名称>/
     "description": "Gamma 校正：亮部/暗部非线性调整"   // 悬停提示
   },
 
-  "runtime": "dotnet",               // ★ 当前仅支持 dotnet（native 请包一层 C# 壳，导出规则见 §5）
+  "runtime": "dotnet",               // ★ dotnet（反射调用，本模板）或 native（C++ DLL + 统一 C ABI，见 §5）
   "assembly": "YourAlgo.dll",        // ★ 相对本 JSON 所在目录
   "type": "YourNs.Filters",          // ★ 类型全名（也可写短名，按 FullName/Name 回退匹配）
   "method": "Gamma",                 // ★ 入口方法名（public/nonpublic、静态/实例均可）

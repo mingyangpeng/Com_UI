@@ -1,0 +1,63 @@
+{
+  "node": {
+    "id": "alg.point3d.save_cloud_ex",
+    "name": "点云文件保存",
+    "group": "IO",
+    "category": "输出",
+    "description": "保存点云到文件（PCD/PLY/TXT 泛化版，load_cloud 的反向闭环：处理结果落盘交付）：type 0=PCD（恒二进制）1=PLY（binary 参数生效）2=TXT（恒文本，分隔符固定单空格）；无输出端口，落盘确认（点数/格式/路径）并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiSaveCloudEx",
+  "inputs": [
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "path",
+      "label": "保存路径",
+      "type": "path",
+      "default": "",
+      "description": "输出文件路径（必填；目录不存在/无权限/磁盘满报保存失败）"
+    },
+    {
+      "name": "type",
+      "label": "文件类型",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 2,
+      "description": "0=PCD(PCL 原生，恒二进制) 1=PLY 2=TXT(每行 \"x y z\" 单空格分隔)"
+    },
+    {
+      "name": "binary",
+      "label": "二进制(仅PLY生效)",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "1=二进制 0=ASCII；仅 PLY 生效（PCD 恒二进制、TXT 恒文本，其他值按 0 处理）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudIO.h",
+      "src/ShapelyAlg/CloudIO.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

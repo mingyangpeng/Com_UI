@@ -1,4 +1,4 @@
-{
+﻿{
   // ============================================================
   // 节点图算子声明模板：本文件 + 算法 DLL 放在 comdll/algo/<名称>/，
   // 宿主启动/重载时自动注册进「算子库」（算法流水线插件读取）。
@@ -23,7 +23,7 @@
 
   // 用户参数：与 algo.json 相同
   "params": [
-    { "name": "gamma", "label": "Gamma", "type": "number", "default": 1.5, "min": 0.2, "max": 3 }
+    { "name": "gamma", "label": "Gamma", "type": "number", "default": 1.5, "min": 0.2, "max": 3, "description": "Gamma 系数：>1 提亮、<1 压暗、=1 原图" }
   ],
 
   // 输出端口：单输出可省略 from（直接用方法返回值）；多输出用 from 指定返回值属性路径

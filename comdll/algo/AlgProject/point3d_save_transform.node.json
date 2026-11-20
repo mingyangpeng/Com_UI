@@ -1,0 +1,54 @@
+{
+  "node": {
+    "id": "alg.point3d.save_transform",
+    "name": "变换保存",
+    "group": "3D 点云",
+    "category": "输出",
+    "description": "把 16 值变换矩阵写入文件（RegistSaveTransform/Flat）：format 0=4x4 多行文本（RegistTool.exe 可直接打开）或 1=单行 16 值逗号分隔（可直接粘回 node.json 参数）；无输入输出端口，确认与 flat 矩阵回显走节点消息；文件→参数方向用 应用已有变换 节点"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiSaveTransform",
+  "inputs": [],
+  "params": [
+    {
+      "name": "init_transform",
+      "label": "变换矩阵(16值)",
+      "type": "text",
+      "default": "1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1",
+      "description": "4x4 行主序 16 值（逗号/空格分隔，允许直接粘贴 4x4 多行文本或 manual_regist 消息中 T= 后内容）"
+    },
+    {
+      "name": "format",
+      "label": "文件格式(0=4x4,1=单行)",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "0=4x4 多行文本（RegistSaveTransform）；1=单行 16 值逗号分隔（RegistSaveTransformFlat）"
+    },
+    {
+      "name": "path",
+      "label": "保存路径",
+      "type": "path",
+      "default": "",
+      "description": "输出文件路径（必填）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/tools/Point3DAlg_Regist.h",
+      "src/Point3DAlg/tools/Point3DAlg_Regist.cpp",
+      "src/ShapelyAlg/ShapelyAlg.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools",
+      "src/ShapelyAlg"
+    ]
+  }
+}

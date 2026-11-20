@@ -5,6 +5,7 @@ using Avalonia.Input;
 using Avalonia.Layout;
 using Avalonia.Media;
 using ComUI.Sdk;
+using ComUI.Sdk.Ui;
 
 namespace ComUI.Host.Views;
 
@@ -19,13 +20,11 @@ public sealed class PropertiesView : UserControl
 {
     private static readonly Brush Dim = new SolidColorBrush(Color.FromRgb(0x98, 0x98, 0xA0));
     private static readonly Brush Header = new SolidColorBrush(Color.FromRgb(0xF5, 0xF5, 0xF7));
-    private static readonly Brush LabelBrush = new SolidColorBrush(Color.FromRgb(0x8E, 0x8E, 0x93));
-    private static readonly Brush CardBg = new SolidColorBrush(Color.FromRgb(0x2C, 0x2C, 0x31));
-    private static readonly Brush CardBorder = new SolidColorBrush(Color.FromRgb(0x3A, 0x3A, 0x40));
     private static readonly Brush Hairline = new SolidColorBrush(Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF));
 
     // —— 对象模式：算子详情 ——
     private readonly StackPanel _objectSection = new() { Spacing = 0, IsVisible = false };
+    private CollapsibleSection _objectCard = null!;   // 标题随 SectionTitle 变化（算子/点云/图像）
     private readonly TextBlock _objTitle = new()
     {
         FontSize = 15, FontWeight = FontWeight.SemiBold, Foreground = Header,
@@ -66,26 +65,24 @@ public sealed class PropertiesView : UserControl
         Grid.SetColumn(collapse, 1);
         head.Children.Add(collapse);
 
-        // 对象详情卡（标题 + 说明 + 分隔 + 信息行）
-        var objInner = new StackPanel { Spacing = 8, Margin = new Thickness(13, 12) };
+        // 对象详情卡（标题 + 说明 + 分隔 + 信息行）——可折叠
+        var objInner = new StackPanel { Spacing = 8 };
         objInner.Children.Add(_objTitle);
         objInner.Children.Add(_objDesc);
         objInner.Children.Add(new Border { Height = 1, Background = Hairline });
         objInner.Children.Add(_objRows);
-        _objectSection.Children.Add(SectionLabel("算子"));
-        _objectSection.Children.Add(Card(objInner, new Thickness(12, 0, 12, 4)));
+        _objectCard = new CollapsibleSection("算子", objInner, expanded: true);
+        _objectSection.Children.Add(_objectCard);
 
-        // 参数卡（插件自绘控件，标题/说明已在对象卡显示，此处只放编辑器 + 操作）
-        var paramInner = new StackPanel { Spacing = 6, Margin = new Thickness(13, 12) };
+        // 参数卡（插件自绘控件）——可折叠
+        var paramInner = new StackPanel { Spacing = 6 };
         paramInner.Children.Add(_paramHost);
-        _paramSection.Children.Add(SectionLabel("参数"));
-        _paramSection.Children.Add(Card(paramInner, new Thickness(12, 4, 12, 0)));
+        var paramCard = new CollapsibleSection("参数", paramInner, expanded: true);
+        _paramSection.Children.Add(paramCard);
 
-        // 面板 / 宿主卡
-        _hostSection.Children.Add(SectionLabel("面板"));
-        _hostSection.Children.Add(Card(_panelProps));
-        _hostSection.Children.Add(SectionLabel("宿主"));
-        _hostSection.Children.Add(Card(_hostProps));
+        // 面板 / 宿主卡——可折叠
+        _hostSection.Children.Add(new CollapsibleSection("面板", _panelProps, expanded: true));
+        _hostSection.Children.Add(new CollapsibleSection("宿主", _hostProps, expanded: false));
 
         var body = new StackPanel { Spacing = 2 };
         body.Children.Add(head);
@@ -99,22 +96,6 @@ public sealed class PropertiesView : UserControl
             Content = body,
         };
     }
-
-    private static TextBlock SectionLabel(string text) => new()
-    {
-        Text = text, FontSize = 11.5, FontWeight = FontWeight.SemiBold,
-        Foreground = LabelBrush, Margin = new Thickness(16, 16, 16, 6),
-    };
-
-    private static Border Card(Control child, Thickness? margin = null) => new()
-    {
-        Child = child,
-        Background = CardBg,
-        BorderBrush = CardBorder,
-        BorderThickness = new Thickness(1),
-        CornerRadius = new CornerRadius(10),
-        Margin = margin ?? new Thickness(12, 0, 12, 0),
-    };
 
     public void SetPanelRows(IEnumerable<(string Key, string Value)> rows)
     {
@@ -145,6 +126,7 @@ public sealed class PropertiesView : UserControl
     /// <summary>显示 Tool 侧边栏（算子库）推送的选中对象详情；参数控件挂到共用参数卡。</summary>
     public void ShowObject(PropsRequest req)
     {
+        _objectCard.Title = req.SectionTitle;
         _objTitle.Text = req.Title;
         _objDesc.Text = req.Description ?? "";
         _objDesc.IsVisible = !string.IsNullOrWhiteSpace(req.Description);

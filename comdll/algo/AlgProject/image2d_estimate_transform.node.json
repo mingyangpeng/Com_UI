@@ -1,0 +1,57 @@
+{
+  "node": {
+    "id": "alg.image2d.estimate_transform",
+    "name": "对应点变换估计",
+    "group": "2D 图像",
+    "category": "测量",
+    "description": "两组数量相等的 2D 对应点做 RANSAC 几何估计（0=部分仿射 4DOF / 1=单应 8DOF）；xy 取自点云 xyz（z 忽略），矩阵与内点数并入节点消息；供已有外部对应点的调用方独立复用几何估计"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiEstimateTransform",
+  "inputs": [
+    {
+      "name": "对应点A",
+      "type": "cloud"
+    },
+    {
+      "name": "对应点B",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "motion",
+      "label": "运动模型",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "0=部分仿射 4DOF（旋转+等比缩放+平移，>=3 点） 1=单应 8DOF（平面/透视，>=4 点）"
+    },
+    {
+      "name": "ransac_threshold",
+      "label": "RANSAC阈值(px)",
+      "type": "number",
+      "default": 3.0,
+      "min": 0.1,
+      "max": 100,
+      "description": "RANSAC 重投影阈值（像素，典型 3.0）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

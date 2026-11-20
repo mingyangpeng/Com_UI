@@ -1,0 +1,34 @@
+{
+  "node": {
+    "id": "alg.image2d.fit_circle",
+    "name": "单目标圆拟合",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "点集最小二乘圆拟合（Kåsa 代数法 + SVD）：圆心/半径/残差 rms 并入节点消息，无端口输出；输入点集可来自 contour_cloud / corner_sub_pix 等节点"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiFitCircle",
+  "inputs": [
+    {
+      "name": "点集",
+      "type": "cloud"
+    }
+  ],
+  "params": [],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

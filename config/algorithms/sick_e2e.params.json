@@ -1,8 +1,0 @@
-{
-  "isOperator": true,
-  "params": {
-    "SICK 扫描读取.folder": "Z:\\ScanImage\\3D",
-    "SICK 扫描读取.step": 64,
-    "体素下采样.leaf_size": 0.05
-  }
-}

@@ -1,0 +1,116 @@
+{
+  "node": {
+    "id": "alg.image2d.match_template_pyramid",
+    "name": "金字塔对位",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "金字塔粗搜加速的旋转+尺度模板匹配（match_template_ex 提速版，2~3 层典型提速 4~10 倍）：输出模板中心落点，语义与 ex 一致"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiMatchTemplatePyramid",
+  "inputs": [
+    {
+      "name": "搜索图",
+      "type": "image"
+    },
+    {
+      "name": "模板",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "匹配方法",
+      "type": "int",
+      "default": 5,
+      "min": 0,
+      "max": 5,
+      "description": "建议归一化类（SQDIFF 系得分跨层不可比）"
+    },
+    {
+      "name": "scale_lo",
+      "label": "尺度下限",
+      "type": "number",
+      "default": 0.8,
+      "min": 0.01,
+      "max": 10,
+      "description": "尺度搜索范围下限"
+    },
+    {
+      "name": "scale_hi",
+      "label": "尺度上限",
+      "type": "number",
+      "default": 1.2,
+      "min": 0.01,
+      "max": 10,
+      "description": "尺度搜索范围上限"
+    },
+    {
+      "name": "scale_step",
+      "label": "尺度步进",
+      "type": "number",
+      "default": 0.05,
+      "min": 0.001,
+      "max": 10,
+      "description": "尺度步进（范围勿开过大：代价=尺度数×角度数）"
+    },
+    {
+      "name": "angle_lo",
+      "label": "角度下限",
+      "type": "number",
+      "default": -15,
+      "min": -360,
+      "max": 360,
+      "description": "角度下限（度，逆时针）"
+    },
+    {
+      "name": "angle_hi",
+      "label": "角度上限",
+      "type": "number",
+      "default": 15,
+      "min": -360,
+      "max": 360,
+      "description": "角度上限（度，逆时针）"
+    },
+    {
+      "name": "angle_step",
+      "label": "角度步进",
+      "type": "number",
+      "default": 1,
+      "min": 0.01,
+      "max": 90,
+      "description": "角度步进（度）"
+    },
+    {
+      "name": "levels",
+      "label": "金字塔层数",
+      "type": "int",
+      "default": 2,
+      "min": 1,
+      "max": 6,
+      "description": ">6 自动截断；模板最小边<12 或图像最小边<32 时自动截断（小模板用 ex）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

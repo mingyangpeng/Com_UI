@@ -85,8 +85,15 @@
 #include "Geom.h"
 #include "Stereo.h"
 #include "ImageProcessor.h"
+
+// 点云两个模块依赖 PCL 头（CloudProcessor.h / CloudIO.h 顶部 include <pcl/*>），
+// 无 PCL 构建时整块不引入（工单 002，沿用 Point3DAlg 的 POINT3DALG_HAS_PCL 先例）。
+// SHAPELYALG_HAS_PCL 由 ShapelyAlg 目标在 PCL_FOUND 时 PUBLIC 定义，随链接传递给
+// 消费方（Point3DAlg tools / BusinessAlg / 测试 exe），无需各自再定义。
+#ifdef SHAPELYALG_HAS_PCL
 #include "CloudProcessor.h"
 #include "CloudIO.h"
+#endif
 
 // ---------------- OpenCV 适配层（cv::Rect/RotatedRect → Geom） ----------------
 
@@ -135,8 +142,9 @@ public:
 
 // ---------------- PCL 适配层（pcl::PointCloud → Stereo） ----------------
 // （PCL 头较重，按需单独 include "ShapelyAlg.h" 亦可用；
-//   本总入口默认引入，与 CloudProcessor 一致。）
+//   本总入口默认引入，与 CloudProcessor 一致。无 PCL 时整层不编译。）
 
+#ifdef SHAPELYALG_HAS_PCL
 #include <pcl/point_types.h>
 #include <pcl/point_cloud.h>
 
@@ -168,8 +176,12 @@ public:
 
 } // namespace shapely
 
-// ---------------- HeightMap 适配层（HeightMap → cv::Mat，接 ImageProcessor 全链） ----------------
+#endif // SHAPELYALG_HAS_PCL（PCL 适配层）
 
+// ---------------- HeightMap 适配层（HeightMap → cv::Mat，接 ImageProcessor 全链） ----------------
+// HeightMap 类型来自 CloudProcessor.h——无 PCL 时本层一并跳过（工单 002）。
+
+#ifdef SHAPELYALG_HAS_PCL
 #include <cmath>
 #include <algorithm>
 
@@ -227,5 +239,7 @@ public:
 };
 
 } // namespace shapely
+
+#endif // SHAPELYALG_HAS_PCL（HeightMap 适配层）
 
 #endif // SHAPELYALG_H

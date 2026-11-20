@@ -1,0 +1,53 @@
+{
+  "node": {
+    "id": "alg.point3d.dome_fit_base",
+    "name": "稳健基面拟合",
+    "group": "3D 点云",
+    "category": "测量",
+    "description": "全点云迭代修剪最小二乘平面（剔除上方出点，拱形 bump/凸台不干扰，DomeFitBase）：法向/平面方程/σ/内点数并入节点消息；与 拱形球顶拟合 的分工是不需要检出 bump、纯平面云同样可用；与 ROI平面量测 的分工是全云自动去凸点而非矩形 ROI 内普通最小二乘"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiDomeFitBase",
+  "inputs": [
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "base_mad_factor",
+      "label": "修剪因子",
+      "type": "number",
+      "default": 3.0,
+      "min": 0.0,
+      "description": "每轮剔除高度 > 中位数 + factor·MAD 的上方出点"
+    },
+    {
+      "name": "base_iterations",
+      "label": "修剪迭代次数",
+      "type": "int",
+      "default": 5,
+      "min": 1,
+      "max": 100,
+      "description": "基面修剪迭代轮数（每轮从全点重建内点集）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/tools/Point3DAlg_DomeFit.h",
+      "src/Point3DAlg/tools/Point3DAlg_DomeFit.cpp",
+      "src/ShapelyAlg/ShapelyAlg.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools",
+      "src/ShapelyAlg"
+    ]
+  }
+}

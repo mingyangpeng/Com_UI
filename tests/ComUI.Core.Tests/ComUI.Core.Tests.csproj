@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\ComUI.Core\ComUI.Core.csproj" />
     <ProjectReference Include="..\..\src\Plugins\ComUI.Plugin.NodeGraph\ComUI.Plugin.NodeGraph.csproj" />
+    <ProjectReference Include="..\..\src\Plugins\ComUI.Plugin.Cloud3D\ComUI.Plugin.Cloud3D.csproj" />
   </ItemGroup>
 
 </Project>

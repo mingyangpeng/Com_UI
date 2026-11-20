@@ -9,7 +9,7 @@
 //   支持 .ply / .pcd；.txt/.xyz 取前三列
 //
 // 键盘：
-//   F1..F6    切换策略（标题栏显示；数字键 1-6 被 PCL 内置 style 吞掉，改用功能键）
+//   F1..F7    切换策略（标题栏显示；数字键 1-6 被 PCL 内置 style 吞掉，改用功能键）
 //   Enter     以当前位姿为初值配准
 //   Space     连续迭代开关
 //   R         复位单位阵
@@ -157,7 +157,7 @@ private:
     {
         std::printf(
             "\n===== Point3DAlg 手动配准工具 =====\n"
-            "  F1..F6   切换策略（ICP-P2P / ICP-P2PL / GICP / FPFH+RANSAC / NDT / PCA）\n"
+            "  F1..F7   切换策略（ICP-P2P / ICP-P2PL / GICP / FPFH+RANSAC / NDT / PCA / 多尺度金字塔）\n"
             "  Enter    以当前位姿为初值配准\n"
             "  Space    连续迭代开关\n"
             "  R        复位单位阵      P  保存变换\n"
@@ -246,8 +246,8 @@ private:
         std::transform(sym.begin(), sym.end(), sym.begin(),
                        [](unsigned char c) { return (char)std::tolower(c); });
 
-        // 策略 1..6 → F1..F6
-        if (sym.size() == 2 && sym[0] == 'f' && sym[1] >= '1' && sym[1] <= '6') {
+        // 策略 1..7 → F1..F7
+        if (sym.size() == 2 && sym[0] == 'f' && sym[1] >= '1' && sym[1] <= '7') {
             OnStrategy(sym[1] - '0');
             return;
         }

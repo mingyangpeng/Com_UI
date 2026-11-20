@@ -1,0 +1,38 @@
+{
+  "node": {
+    "id": "alg.image2d.phase_correlate",
+    "name": "相位相关平移",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "相位相关平移估计（FFT 频域互功率谱，对光照/亮度变化极稳、亚像素精度）：输入基准图/平移后图（尺寸须一致）；dx/dy（b 相对 a 的位移）与峰值响应（5x5 质心区域能量占比，>0.3 可信）并入节点消息；不启用窗口函数，强边缘效应场景先接模糊节点平滑"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiPhaseCorrelate",
+  "inputs": [
+    {
+      "name": "基准图",
+      "type": "image"
+    },
+    {
+      "name": "平移后图",
+      "type": "image"
+    }
+  ],
+  "params": [],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

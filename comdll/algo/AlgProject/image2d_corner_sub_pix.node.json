@@ -1,0 +1,57 @@
+{
+  "node": {
+    "id": "alg.image2d.corner_sub_pix",
+    "name": "角点亚像素细化",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "对初始角点做梯度法亚像素细化（约 ±0.5px）：输出细化点集点云(z=0)与十字标注图，坐标并入节点消息；初始点可来自 good_features/harris_corners 消息坐标或 contour_cloud 轮廓点云"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiCornerSubPix",
+  "inputs": [
+    {
+      "name": "图像",
+      "type": "image"
+    },
+    {
+      "name": "初始点集",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "win_size",
+      "label": "搜索窗口",
+      "type": "int",
+      "default": 11,
+      "min": 3,
+      "max": 51,
+      "description": "亚像素搜索窗口边长（典型 5~11）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "标注图",
+      "type": "image"
+    },
+    {
+      "name": "细化点集",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

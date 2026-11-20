@@ -1,0 +1,130 @@
+{
+  "node": {
+    "id": "alg.image2d.hough_circles_roi",
+    "name": "霍夫圆ROI",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "霍夫圆检测 ROI 版（内部自动 3x3 预平滑，同 hough_circles）：仅在 ROI 内检测（圆心平移回全图坐标系），roi_w/roi_h ≤0 = 全图；限区检测省时并屏蔽区外干扰；与 hough_circles（全图版）的分工：输入/参数语义相同，本节点多 roi_x/y/w/h 四个 ROI 参数"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiHoughCirclesRoi",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "roi_x",
+      "label": "ROI X",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "ROI 左上角 X"
+    },
+    {
+      "name": "roi_y",
+      "label": "ROI Y",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "ROI 左上角 Y"
+    },
+    {
+      "name": "roi_w",
+      "label": "ROI 宽(0全图)",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "ROI 宽（<=0 = 全图，同 connected_components_roi）"
+    },
+    {
+      "name": "roi_h",
+      "label": "ROI 高(0全图)",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 100000,
+      "description": "ROI 高（<=0 = 全图）"
+    },
+    {
+      "name": "dp",
+      "label": "分辨率倒数",
+      "type": "number",
+      "default": 1,
+      "min": 0.1,
+      "max": 4,
+      "description": "分辨率倒数"
+    },
+    {
+      "name": "min_dist",
+      "label": "圆心最小间距",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 10000,
+      "description": "圆心最小间距（像素）"
+    },
+    {
+      "name": "param1",
+      "label": "Canny高阈值",
+      "type": "number",
+      "default": 50,
+      "min": 1,
+      "max": 1000,
+      "description": "内部 Canny 高阈值"
+    },
+    {
+      "name": "param2",
+      "label": "投票阈值",
+      "type": "number",
+      "default": 20,
+      "min": 1,
+      "max": 1000,
+      "description": "圆心投票阈值（越小检出圆越多）"
+    },
+    {
+      "name": "min_r",
+      "label": "最小半径",
+      "type": "number",
+      "default": 5,
+      "min": 0,
+      "max": 10000,
+      "description": "最小半径（像素）"
+    },
+    {
+      "name": "max_r",
+      "label": "最大半径(0不限)",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 10000,
+      "description": "最大半径（≤0 不限）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

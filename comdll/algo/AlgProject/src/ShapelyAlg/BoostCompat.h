@@ -26,6 +26,7 @@ namespace boost { namespace iostreams {
 
 typedef boost::intmax_t stream_offset;
 
+// 以下三者与旧 STL 语义等价的平凡转换：_Fpos 恒为 0，streamoff 即完整位置。
 inline std::streamoff stream_offset_to_streamoff(stream_offset off) { return off; }
 inline std::streampos offset_to_position(stream_offset off) { return off; }
 

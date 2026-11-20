@@ -1,0 +1,66 @@
+{
+  "node": {
+    "id": "alg.point3d.knn_search",
+    "name": "K近邻搜索",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "KdTree K 近邻搜索（query 查询点 + k）：返回按欧氏距离升序的最近邻列表（距离为核心层开方口径，非 PCL 平方距离原始值）；无输出端口，消息恒以 knn k/hits 开头并列出全部命中组 idx:dist（k 上限 30——消息通道 900 字节截断安全，超出按 30 取）；定位：估点距选参（voxel leaf / 聚类 tolerance）/ 局部诊断"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiKnnSearch",
+  "inputs": [
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "query_x",
+      "label": "查询点X",
+      "type": "number",
+      "default": 0.0,
+      "description": "查询点 X 坐标（与点云同单位）"
+    },
+    {
+      "name": "query_y",
+      "label": "查询点Y",
+      "type": "number",
+      "default": 0.0,
+      "description": "查询点 Y 坐标"
+    },
+    {
+      "name": "query_z",
+      "label": "查询点Z",
+      "type": "number",
+      "default": 0.0,
+      "description": "查询点 Z 坐标"
+    },
+    {
+      "name": "k",
+      "label": "近邻个数",
+      "type": "int",
+      "default": 10,
+      "min": 1,
+      "max": 30,
+      "description": "K 近邻个数（>=1；上限 30，超出按 30 取——消息通道截断安全）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

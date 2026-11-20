@@ -1,0 +1,55 @@
+{
+  "node": {
+    "id": "alg.point3d.apply_transform",
+    "name": "应用已有变换",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "把现成 4x4 变换套到任意点云（RegistApplyTransform）：优先解析 init_transform 文本（manual_regist 消息 T= 后内容可直接粘贴），否则读 transform_file（RegistTool.exe 导出或 save_transform 节点输出）；不做配准计算，是手动配准链路的下游一步；消息回显 flat 矩阵可粘回参数"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiApplyTransform",
+  "inputs": [
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "init_transform",
+      "label": "变换矩阵(16值,优先)",
+      "type": "text",
+      "default": "",
+      "description": "4x4 行主序 16 值（逗号/空格分隔，允许直接粘贴 4x4 多行文本或 manual_regist 消息中 T= 后内容）；非空时优先生效"
+    },
+    {
+      "name": "transform_file",
+      "label": "变换文件(文本为空时读取)",
+      "type": "path",
+      "default": "",
+      "description": "变换文件路径：RegistTool.exe 导出的 regist_T.txt / regist_T_flat.txt 或 save_transform 节点输出（4x4 多行或单行 16 值均可）；init_transform 为空时读取"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "变换后点云",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/tools/Point3DAlg_Regist.h",
+      "src/Point3DAlg/tools/Point3DAlg_Regist.cpp",
+      "src/ShapelyAlg/ShapelyAlg.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools",
+      "src/ShapelyAlg"
+    ]
+  }
+}

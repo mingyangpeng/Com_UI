@@ -19,8 +19,9 @@
     <ProjectReference Include="..\..\ComUI.Sdk\ComUI.Sdk.csproj" />
   </ItemGroup>
 
-  <!-- 编译完成后把插件输出复制到 comdll/ui/Cloud3D（递归 + 原生库平铺，同 Image2D） -->
-  <Target Name="CopyToComdll" AfterTargets="Build">
+  <!-- 编译完成后把插件输出复制到 comdll/ui/Cloud3D（递归 + 原生库平铺，同 Image2D）；
+       SkipCopyToComdll=true 可跳过（宿主运行中 DLL 被锁时做纯编译验证用） -->
+  <Target Name="CopyToComdll" AfterTargets="Build" Condition="'$(SkipCopyToComdll)' != 'true'">
     <ItemGroup>
       <_PluginOutputs Include="$(OutDir)**\*.*" Exclude="$(OutDir)ComUI.Sdk.*;$(OutDir)ComUI.Plugin.Cloud3D.pdb" />
       <_NativeFlat Include="$(OutDir)runtimes\win-x64\native\*.*;$(OutDir)runtimes\linux-x64\native\*.*;$(OutDir)runtimes\linux-arm64\native\*.*" />

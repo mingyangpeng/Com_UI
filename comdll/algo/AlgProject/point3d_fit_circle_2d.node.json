@@ -1,0 +1,81 @@
+{
+  "node": {
+    "id": "alg.point3d.fit_circle_2d",
+    "name": "XY圆拟合(单圆)",
+    "group": "3D 点云",
+    "category": "测量",
+    "description": "对输入点的 XY 投影做单圆拟合（Kåsa 代数解 + MAD 修剪重拟合，FitCircle2D，z 不参与）：输出单点（x=圆心x y=圆心y z=半径），详情并入消息；与 圆孔位量测(circle_fit) 的分工：circle_fit 切高度带+聚类一次检出多孔，本节点假设输入已是同一圆的点（extract_cloud 裁剪后的孔壁/轮廓/边缘点）"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiFitCircle2D",
+  "inputs": [
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "radius_min",
+      "label": "半径下限(mm)",
+      "type": "number",
+      "default": 0.05,
+      "min": 0.0,
+      "description": "半径合理下限（越界判拟合失败）"
+    },
+    {
+      "name": "radius_max",
+      "label": "半径上限(mm)",
+      "type": "number",
+      "default": 50.0,
+      "min": 0.01,
+      "description": "半径合理上限（越界判拟合失败）"
+    },
+    {
+      "name": "rms_max",
+      "label": "残差上限(mm)",
+      "type": "number",
+      "default": 0.02,
+      "min": 0.0,
+      "description": "拟合残差 RMS 上限（超限判非圆/失败）"
+    },
+    {
+      "name": "mad_factor",
+      "label": "修剪因子",
+      "type": "number",
+      "default": 3.0,
+      "min": 0.0,
+      "description": "残差双侧 MAD 修剪因子（剔除 |dist-R| 离群点后重拟合）"
+    },
+    {
+      "name": "iterations",
+      "label": "修剪迭代次数",
+      "type": "int",
+      "default": 3,
+      "min": 1,
+      "max": 100,
+      "description": "修剪重拟合轮数"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "圆心点",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/tools/Point3DAlg_CircleFit.h",
+      "src/Point3DAlg/tools/Point3DAlg_CircleFit.cpp",
+      "src/Point3DAlg/tools/Point3DAlg_FitUtil.h"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/tools"
+    ]
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "node": {
+    "id": "alg.point3d.extract_cloud",
+    "name": "点云裁剪",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "点云几何裁剪（PCL）：2=AABB 盒裁剪（6 参数） 3=有向盒裁剪（obb_params 15 值文本，可反选盒外） 4=多边形 ROI 裁剪（polygon_xy 顶点对文本，XY 投影射线法）；按索引提取不开放（节点间无点集索引来源）；裁剪后点数并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiExtractCloud",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "裁剪方法",
+      "type": "int",
+      "default": 2,
+      "min": 2,
+      "max": 4,
+      "description": "2=cropBox AABB 盒裁剪(闭区间) 3=cropOBB 有向盒裁剪 4=cropPolygonROI 多边形裁剪；与 C API method 编号一致（0/1 按索引提取不开放）"
+    },
+    {
+      "name": "box_min_x",
+      "label": "盒X下限(method 2)",
+      "type": "number",
+      "default": -1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 2：AABB 盒 x 下限（默认全量 = 不裁）"
+    },
+    {
+      "name": "box_min_y",
+      "label": "盒Y下限(method 2)",
+      "type": "number",
+      "default": -1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 2：AABB 盒 y 下限"
+    },
+    {
+      "name": "box_min_z",
+      "label": "盒Z下限(method 2)",
+      "type": "number",
+      "default": -1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 2：AABB 盒 z 下限（任一 min>max 报参数错）"
+    },
+    {
+      "name": "box_max_x",
+      "label": "盒X上限(method 2)",
+      "type": "number",
+      "default": 1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 2：AABB 盒 x 上限"
+    },
+    {
+      "name": "box_max_y",
+      "label": "盒Y上限(method 2)",
+      "type": "number",
+      "default": 1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 2：AABB 盒 y 上限"
+    },
+    {
+      "name": "box_max_z",
+      "label": "盒Z上限(method 2)",
+      "type": "number",
+      "default": 1000000,
+      "min": -1000000,
+      "max": 1000000,
+      "description": "method 2：AABB 盒 z 上限"
+    },
+    {
+      "name": "obb_params",
+      "label": "有向盒参数(method 3)",
+      "type": "text",
+      "default": "0,0,0,1000,1000,1000,1,0,0,0,1,0,0,0,1",
+      "description": "method 3：15 值逗号分隔 = 盒中心 xyz + 三主轴半长 xyz(>0) + 旋转 3x3 行主序（第 d 行 = 第 d 主轴方向）"
+    },
+    {
+      "name": "obb_invert",
+      "label": "反选盒外(method 3)",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "method 3 可选：1=保留盒外点"
+    },
+    {
+      "name": "polygon_xy",
+      "label": "多边形顶点(method 4)",
+      "type": "text",
+      "default": "",
+      "description": "method 4：顶点 XY 对逗号分隔 \"x0,y0,x1,y1,...\"（>= 3 个顶点，XY 投影 + 射线法）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

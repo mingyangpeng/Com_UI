@@ -1,0 +1,67 @@
+{
+  "node": {
+    "id": "alg.image2d.fit_circle_robust",
+    "name": "单目标圆拟合(抗外点)",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "RANSAC 抗外点圆拟合：毛刺/粘连外点场景（纯最小二乘会被拉偏），threshold 为内点判定像素距离（点到圆周 ≤ threshold），内点数并入消息；输出单点云（x=圆心x y=圆心y z=半径）；与 fit_circle（无参最小二乘）的分工：本节点需设 threshold/迭代/种子，对含外点点集更稳"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiFitCircleRobust",
+  "inputs": [
+    {
+      "name": "点集",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "threshold",
+      "label": "内点阈值(px)",
+      "type": "number",
+      "default": 2,
+      "min": 0.01,
+      "max": 1000,
+      "description": "内点判定：点到圆周距离 ≤ threshold（像素；≤0 → 参数非法）"
+    },
+    {
+      "name": "max_iters",
+      "label": "迭代上限",
+      "type": "int",
+      "default": 1000,
+      "min": 1,
+      "max": 100000,
+      "description": "RANSAC 迭代上限（<1 由核心层按 1000 处理）"
+    },
+    {
+      "name": "seed",
+      "label": "随机种子",
+      "type": "int",
+      "default": 42,
+      "min": 0,
+      "max": 2147483647,
+      "description": "随机种子（固定值结果可复现）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "圆心点",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

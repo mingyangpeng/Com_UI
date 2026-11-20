@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
@@ -33,6 +34,9 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
 
     /// <summary>拖拽算子松手时触发（指针捕获式，进程内可靠），参数 = 节点类型 Id + 屏幕坐标。</summary>
     public event Action<string, PixelPoint>? OperatorPlaced;
+
+    /// <summary>请求删除子流程算子（defId, 来源 pipeline.json 路径）。实际删文件+注销由插件处理。</summary>
+    public event Action<string, string>? OperatorDeleteRequested;
 
     private readonly HashSet<string> _collapsedGroups = new();
     private string _filter = "";
@@ -492,6 +496,7 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
 
     private StackPanel? _paramsEditorHost;
     private Button? _paramsAddBtn;
+    private Button? _paramsDeleteBtn;
 
     /// <summary>右侧属性面板的算子内容（自更新控件实例——行点击原地刷新，宿主零改动）。
     /// 未选中时显示提示；选中后显示说明 + 参数编辑器 + 「加入画布」。</summary>
@@ -556,21 +561,50 @@ public sealed class NodeLibraryView : UserControl, IDisposable, IPanelParamsProv
         _paramsAddBtn.Click += (_, _) => { if (_selectedDefId is not null) OperatorClicked?.Invoke(_selectedDefId); };
         root.Children.Add(_paramsEditorHost);
         root.Children.Add(_paramsAddBtn);
+
+        // 删除子流程算子：仅内置以外（有来源 pipeline 文件）的算子可见。删除前弹窗二次确认。
+        _paramsDeleteBtn = new Button
+        {
+            Content = TrashGlyph.WithText("删除此算子", 13),
+            Classes = { "danger" },
+            FontSize = 11.5,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            IsVisible = false,
+        };
+        _paramsDeleteBtn.Click += async (_, _) => await DeleteSelectedOperatorAsync();
+        root.Children.Add(_paramsDeleteBtn);
         return root;
+    }
+
+    /// <summary>删除当前选中的子流程算子：二次确认 → 触发事件由插件删文件+注销+刷新。</summary>
+    private async Task DeleteSelectedOperatorAsync()
+    {
+        if (_selectedDefId is null || !NodeDefs.Map.TryGetValue(_selectedDefId, out var def) ||
+            def.SourcePipelinePath is not { } path)
+            return;   // 内置算子没有来源文件，不可删
+        var owner = TopLevel.GetTopLevel(this) as Window;
+        bool ok = await ConfirmDialog.ShowAsync(owner, "确认删除算子",
+            $"确定要删除算子「{def.Name}」吗？\n\n这会同时删除它对应的算法流水线文件，使用该算子的流水线将无法运行。\n此操作不可恢复。",
+            "删除算子", danger: true);
+        if (!ok) return;
+        OperatorDeleteRequested?.Invoke(def.Id, path);
     }
 
     /// <summary>行点击：把选中算子的说明/参数编辑器刷新进右侧属性面板（编辑值写 _paramOverrides）。</summary>
     private void RefreshParamsContent()
     {
-        if (_paramsEditorHost is null || _paramsAddBtn is null)
+        if (_paramsEditorHost is null || _paramsAddBtn is null || _paramsDeleteBtn is null)
             return;
         _paramsEditorHost.Children.Clear();
         if (_selectedDefId is null || !NodeDefs.Map.TryGetValue(_selectedDefId, out var def))
         {
             _paramsAddBtn.IsVisible = false;
+            _paramsDeleteBtn.IsVisible = false;
             return;
         }
         _paramsAddBtn.IsVisible = true;
+        // 仅子流程算子（有来源文件）可删除；内置算子隐藏删除按钮
+        _paramsDeleteBtn.IsVisible = def.SourcePipelinePath is not null;
 
         var overrides = _paramOverrides.TryGetValue(def.Id, out var ov) ? ov : new Dictionary<string, string>();
         if (!_paramOverrides.ContainsKey(def.Id)) _paramOverrides[def.Id] = overrides;

@@ -1,0 +1,63 @@
+{
+  "node": {
+    "id": "alg.point3d.fit_model",
+    "name": "通用几何拟合",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "通用几何拟合（RANSAC/MSAC/LMS）：method 0=平面[a,b,c,d] 1=球[cx,cy,cz,r] 2=圆柱[轴点+单位轴向+半径] 3=3D圆[圆心+圆平面法向+半径] 4=圆锥[顶点+单位轴向+半开角弧度]；系数布局与内点数并入节点消息（圆柱/圆锥仅 RANSAC——PCL 1.9 限制，fit 参数被忽略；球 MSAC 自动回退 RANSAC）"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiFitModel",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "拟合模型",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 4,
+      "description": "0=plane 平面 1=sphere 球 2=cylinder 圆柱 3=circle3D 三维圆 4=cone 圆锥"
+    },
+    {
+      "name": "fit",
+      "label": "拟合方法",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 2,
+      "description": "0=RANSAC 1=MSAC 2=LMS(LMEDS)；sphere 不支持 MSAC（回退 RANSAC），cylinder/cone 仅 RANSAC"
+    },
+    {
+      "name": "distance_threshold",
+      "label": "内点距离阈值",
+      "type": "number",
+      "default": 0.05,
+      "min": 0.0001,
+      "max": 1000000,
+      "description": "局内点判定距离阈值（与坐标同单位，>0）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

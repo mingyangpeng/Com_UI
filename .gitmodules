@@ -1,0 +1,5 @@
+[submodule "comdll/algo/alg"]
+	path = comdll/algo/alg
+	url = https://github.com/mingyangpeng/alg.git
+	shallow = true
+	filter = blob:none

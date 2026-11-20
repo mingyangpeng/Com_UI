@@ -14,6 +14,8 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/features2d.hpp>
 #include <opencv2/calib3d.hpp>
+#include <opencv2/video.hpp>   // calcOpticalFlowPyrLK / findTransformECC（world440 全含，无新增链接依赖）
+#include <opencv2/photo.hpp>   // fastNlMeansDenoising(Colored)（world440 全含，无新增链接依赖）
 
 #include <math.h>
 #include <stdlib.h>
@@ -21,6 +23,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using shapely::ImageProcessor;
@@ -844,11 +847,22 @@ int Image2DAlg_ConvexityDefects(const float* xy, int count,
         for (int i = 0; i < count; ++i)
             pts.push_back(cv::Point((int)std::lround(xy[i * 2]),
                                     (int)std::lround(xy[i * 2 + 1])));
-        // 凸包方向须与轮廓一致：带符号面积为负（顺时针）时先反转
-        if (ImageProcessor::contourArea(pts, true) < 0.0)
+        // convexityDefects 隐含要求凸包为 CCW 方向（与 findContours 正规用法一致），
+        // 顺时针轮廓必须先反转点序，否则缺陷静默算错（星形轮廓模糊测试实证）。
+        // 旧实现的缺陷：反转后索引落在反转数组上、而"是否反转"未对外暴露，
+        // 调用方无法映射回输入——违反 api.h 的 *index = 输入点序 契约。
+        // 修复：反转照做，返回索引统一映射回输入点序（count-1-idx）。
+        const double signedArea = ImageProcessor::contourArea(pts, true);
+        bool reversedOrder = false;
+        if (signedArea < 0.0) {
             std::reverse(pts.begin(), pts.end());
+            reversedOrder = true;
+        }
         std::vector<int> hull;
         cv::convexHull(pts, hull, false);
+        // 退化输入（全部共线等）凸包可能少于 3 点：convexityDefects 会断言，
+        // 这里按"无凹陷"提前返回 0/NULL/0（与凸形无检出口径一致），不透出 -99。
+        if (hull.size() < 3) return 0;
         std::vector<cv::Vec4i> defects;
         ImageProcessor::convexityDefects(pts, hull, defects);
         if (defects.empty()) return 0;
@@ -857,12 +871,13 @@ int Image2DAlg_ConvexityDefects(const float* xy, int count,
         if (!arr) return -4;
         for (size_t i = 0; i < defects.size(); ++i) {
             Image2DAlg_Defect& d = arr[i];
-            d.start_index = defects[i][0];
-            d.end_index = defects[i][1];
-            d.farthest_index = defects[i][2];
+            // 索引映射回输入点序：反转数组的 idx 对应原输入的 count-1-idx
+            d.start_index = reversedOrder ? count - 1 - defects[i][0] : defects[i][0];
+            d.end_index = reversedOrder ? count - 1 - defects[i][1] : defects[i][1];
+            d.farthest_index = reversedOrder ? count - 1 - defects[i][2] : defects[i][2];
             d.depth = defects[i][3] / 256.0;   // OpenCV 定点数：depth*256
-            d.fx = pts[d.farthest_index].x;
-            d.fy = pts[d.farthest_index].y;
+            d.fx = pts[defects[i][2]].x;
+            d.fy = pts[defects[i][2]].y;
         }
         *out_defects = arr;
         *out_count = (int)defects.size();
@@ -2104,6 +2119,275 @@ void Image2DAlg_FreePoint2f(Image2DAlg_Point2f* pts) {
 }
 
 
+// ---------------- 特征链路拆分（2.1.0：检测/描述/匹配/几何估计可独立复用，与 ORBAlign 同风格） ----------------
+
+int Image2DAlg_FastFeatures(const Image2DAlg_Image* in, int threshold, int nonmax_suppression,
+                            Image2DAlg_Point2f** out_points, int* out_count) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!out_points || !out_count) return -1;
+    if (threshold <= 0) return -3;
+    *out_points = nullptr;
+    *out_count = 0;
+    try {
+        cv::Mat gray = GrayOf(src);
+        cv::Ptr<cv::FastFeatureDetector> fast =
+            cv::FastFeatureDetector::create(threshold, nonmax_suppression != 0);
+        std::vector<cv::KeyPoint> kps;
+        fast->detect(gray, kps);
+        if (kps.empty()) return 0;   // 无检出属正常（平坦图）
+        size_t bytes = sizeof(Image2DAlg_Point2f) * kps.size();
+        Image2DAlg_Point2f* arr = (Image2DAlg_Point2f*)malloc(bytes);
+        if (!arr) return -4;
+        for (size_t i = 0; i < kps.size(); ++i) {
+            arr[i].x = kps[i].pt.x;
+            arr[i].y = kps[i].pt.y;
+        }
+        *out_points = arr;
+        *out_count = (int)kps.size();
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+// 描述子算子工厂（ComputeDescriptors / 三检测器 / DetectAndMatch 共用，2.2.0 抽取）。
+// type: 0=ORB 1=BRISK 2=AKAZE 3=SIFT；contrast_threshold <= 0 -> 各算法默认
+//（BRISK thresh=30 / AKAZE threshold=0.001 / SIFT contrastThreshold=0.04，ORB 无此参数）；
+// n_features：ORB <= 0 取默认 500（与 ORBAlign 一致）、SIFT <= 0 不限、其余算法无上限参数忽略。
+// C++ 链接（返回 cv::Ptr 非法定义为 C 链接可导出，消除 C4190；本文件内部 helper 不导出）
+extern "C++" {
+cv::Ptr<cv::Feature2D> MakeFeatureAlgorithm(int type, int n_features, double contrast_threshold) {
+    if (type == 0) {
+        if (n_features <= 0) n_features = 500;
+        // edgeThreshold 默认 31 在小图上挤出可用区域，同 ORBAlign 收紧到 8
+        return cv::ORB::create(n_features, 1.2f, 8, 8);
+    }
+    if (type == 1) {
+        int thresh = contrast_threshold > 0.0 ? (int)std::lround(contrast_threshold) : 30;
+        return cv::BRISK::create(thresh);
+    }
+    if (type == 2) {
+        const float threshold = contrast_threshold > 0.0 ? (float)contrast_threshold : 0.001f;
+        return cv::AKAZE::create(cv::AKAZE::DESCRIPTOR_MLDB, 0, 3, threshold);
+    }
+    return cv::SIFT::create(n_features > 0 ? n_features : 0, 3,
+                            contrast_threshold > 0.0 ? contrast_threshold : 0.04);
+}
+} // extern "C++"
+
+// cv::Mat 描述子 -> Descriptors 结构（malloc data/fdata；内存不足返回 -4）。
+// 前置：desc 非空、out 的 data/fdata 尚未分配（ComputeDescriptors / 检测器共用）。
+int FillDescriptors(int type, const cv::Mat& desc, Image2DAlg_Descriptors* out) {
+    const bool is_float = (desc.depth() == CV_32F);
+    const size_t n_elem = (size_t)desc.rows * desc.cols;
+    // 整块 memcpy 隐含紧排假设；算子输出的描述子 Mat 总是紧排，此处防御性兜底
+    //（上游行为变化时静默复制出步长错位的数据比 -99 更难排查）
+    const cv::Mat cdesc = desc.isContinuous() ? desc : desc.clone();
+    if (is_float) {
+        float* buf = (float*)malloc(n_elem * sizeof(float));
+        if (!buf) return -4;
+        memcpy(buf, cdesc.data, n_elem * sizeof(float));
+        out->fdata = buf;
+    } else {
+        unsigned char* buf = (unsigned char*)malloc(n_elem);
+        if (!buf) return -4;
+        memcpy(buf, cdesc.data, n_elem);
+        out->data = buf;
+    }
+    out->type = type;
+    out->dim = desc.cols;
+    out->is_float = is_float ? 1 : 0;
+    out->count = desc.rows;
+    return 0;
+}
+
+// BFMatcher kNN(k=2) + Lowe 比率测试（MatchFeatures / DetectAndMatch 共用）。
+// 二进制用 Hamming、浮点用 L2；比率测试后不足 2 对返回 -2（平坦图属正常）。
+int MatchDescriptorsLowe(const cv::Mat& d1, const cv::Mat& d2, bool is_float, double ratio,
+                         std::vector<cv::DMatch>& good) {
+    cv::BFMatcher matcher(is_float ? cv::NORM_L2 : cv::NORM_HAMMING);
+    std::vector<std::vector<cv::DMatch>> knn;
+    matcher.knnMatch(d1, d2, knn, 2);
+    good.clear();
+    for (const auto& km : knn)
+        if (km.size() == 2 && km[0].distance < ratio * km[1].distance)
+            good.push_back(km[0]);
+    if ((int)good.size() < 2) return -2;
+    return 0;
+}
+
+int Image2DAlg_ComputeDescriptors(const Image2DAlg_Image* in,
+                                  const Image2DAlg_Point2f* pts, int count,
+                                  int type, int n_features,
+                                  Image2DAlg_Descriptors* out) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!pts || !out) return -1;
+    if (count < 1) return -3;
+    if (type < 0 || type > 3) return -3;
+    try {
+        // 关键点须在图像内（越界无法取邻域计算描述子）。
+        // 该检查必须在清零 out 之前：复用同一结构体（上次结果尚未 Free）的调用方
+        // 在 -2 出口不能丢已有缓冲指针——本库无凭据替其释放，只能靠泄漏
+        for (int i = 0; i < count; ++i)
+            if (pts[i].x < 0.0f || pts[i].y < 0.0f ||
+                pts[i].x >= (float)src.cols || pts[i].y >= (float)src.rows)
+                return -2;
+        out->type = type;
+        out->dim = 0;
+        out->is_float = 0;
+        out->count = 0;
+        out->data = nullptr;
+        out->fdata = nullptr;
+        cv::Mat gray = GrayOf(src);
+        // 描述子采样窗口最大约 ±48px（ORB 模板/方向窗 ±15、BRISK 采样圆 ~21、
+        // AKAZE MLDB ~25、SIFT 窗口 ~36，关键点名义尺寸固定 8）。四类算子的
+        // compute 对"外部关键点"不做统一的贴边防护（实测 ORB 在 8~15px 贴边区、
+        // AKAZE/SIFT 在 ~25px 内的输出与确定性参照不一致——越界读出垃圾描述子，
+        // 不抛异常不报错），这里统一复制边框扩图后偏移采样，保证：
+        // - 任何贴边点都落在图内，无越界读、结果确定；
+        // - 离边 >= 采样窗的内部点结果与直接计算逐位一致（复制边框不进入采样窗）。
+        const int margin = 64;
+        cv::Mat padded;
+        cv::copyMakeBorder(gray, padded, margin, margin, margin, margin, cv::BORDER_REPLICATE);
+        std::vector<cv::KeyPoint> kps;
+        kps.reserve(count);
+        for (int i = 0; i < count; ++i) {
+            cv::KeyPoint kp(pts[i].x + margin, pts[i].y + margin, 8.0f);   // 名义邻域尺寸
+            // AKAZE 按关键点 class_id 选尺度空间层（须落在 [0, evolution 数)），
+            // 外部关键点统一取基尺度（class_id=0，与其 detect 的基尺度点一致）
+            if (type == 2) kp.class_id = 0;
+            kps.push_back(kp);
+        }
+        // 描述子算子工厂：ORB 参数与 ORBAlign 保持一致；SIFT 自 4.4.0 进入
+        // 主库 features2d（world440 已导出 cv::SIFT::create，无需 contrib）
+        cv::Ptr<cv::Feature2D> algo = MakeFeatureAlgorithm(type, n_features, 0.0);
+        cv::Mat desc;
+        algo->compute(padded, kps, desc);
+        // compute 可能丢弃无法计算的点——数量对不上即不足（扩图后贴边点不再被
+        // ORB 的边距过滤误杀，该出口仅作为防御保留）
+        if ((int)kps.size() != count || desc.empty() || desc.rows != count) return -2;
+        return FillDescriptors(type, desc, out);
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+void Image2DAlg_FreeDescriptors(Image2DAlg_Descriptors* d) {
+    if (!d) return;
+    free(d->data);
+    d->data = nullptr;
+    free(d->fdata);
+    d->fdata = nullptr;
+}
+
+int Image2DAlg_MatchFeatures(const Image2DAlg_Descriptors* d1,
+                             const Image2DAlg_Descriptors* d2,
+                             const Image2DAlg_Point2f* pts1,
+                             const Image2DAlg_Point2f* pts2,
+                             double ratio,
+                             Image2DAlg_OrbMatch** out_matches, int* out_count) {
+    if (!d1 || !d2 || !pts1 || !pts2 || !out_matches || !out_count) return -1;
+    if (ratio <= 0.0 || ratio >= 1.0) return -3;
+    if (d1->type != d2->type || d1->dim != d2->dim || d1->is_float != d2->is_float) return -3;
+    if (d1->type < 0 || d1->type > 3) return -3;
+    if (d1->count < 1 || d2->count < 1) return -2;   // 空描述子集 = 特征不足
+    if (d1->is_float ? (!d1->fdata || !d2->fdata) : (!d1->data || !d2->data)) return -1;
+    *out_matches = nullptr;
+    *out_count = 0;
+    try {
+        // 调用方保证 pts1/pts2 与 d1/d2 行序一一对应（ComputeDescriptors 的输入点集）
+        cv::Mat m1, m2;
+        if (d1->is_float) {
+            m1 = cv::Mat(d1->count, d1->dim, CV_32F, (void*)d1->fdata);
+            m2 = cv::Mat(d2->count, d2->dim, CV_32F, (void*)d2->fdata);
+        } else {
+            m1 = cv::Mat(d1->count, d1->dim, CV_8U, (void*)d1->data);
+            m2 = cv::Mat(d2->count, d2->dim, CV_8U, (void*)d2->data);
+        }
+        std::vector<cv::DMatch> good;
+        if (int rc = MatchDescriptorsLowe(m1, m2, d1->is_float != 0, ratio, good)) return rc;
+        Image2DAlg_OrbMatch* arr =
+            (Image2DAlg_OrbMatch*)malloc(sizeof(Image2DAlg_OrbMatch) * good.size());
+        if (!arr) return -4;
+        for (size_t i = 0; i < good.size(); ++i) {
+            arr[i].x1 = pts1[good[i].queryIdx].x;
+            arr[i].y1 = pts1[good[i].queryIdx].y;
+            arr[i].x2 = pts2[good[i].trainIdx].x;
+            arr[i].y2 = pts2[good[i].trainIdx].y;
+            arr[i].distance = good[i].distance;
+        }
+        *out_matches = arr;
+        *out_count = (int)good.size();
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+// 匹配点对 -> OpenCV 点组（matches[i] 为 in1 → in2 对应）
+void MatchPointsOf(const Image2DAlg_OrbMatch* matches, int count,
+                   std::vector<cv::Point2f>& p1, std::vector<cv::Point2f>& p2) {
+    p1.reserve(count);
+    p2.reserve(count);
+    for (int i = 0; i < count; ++i) {
+        p1.push_back(cv::Point2f((float)matches[i].x1, (float)matches[i].y1));
+        p2.push_back(cv::Point2f((float)matches[i].x2, (float)matches[i].y2));
+    }
+}
+
+int Image2DAlg_EstimateAffinePartial(const Image2DAlg_OrbMatch* matches,
+                                     int count, double ransac_reproj_threshold,
+                                     double m[6], int* out_inliers) {
+    if (!matches || !m || !out_inliers) return -1;
+    if (count < 3) return -2;   // 相似变换最少 2 点 + 1 点校验，< 3 直接判不足
+    if (ransac_reproj_threshold <= 0.0) return -3;
+    *out_inliers = 0;
+    try {
+        std::vector<cv::Point2f> p1, p2;
+        MatchPointsOf(matches, count, p1, p2);
+        cv::Mat inlierMask;
+        // in1 → in2 方向（与 ORBAlign 的 estimateAffine2D(p1, p2) 一致）
+        cv::Mat A = cv::estimateAffinePartial2D(p1, p2, inlierMask, cv::RANSAC,
+                                                ransac_reproj_threshold);
+        if (A.empty() || A.rows < 2 || A.cols < 3) return -2;
+        for (int r = 0; r < 2; ++r)
+            for (int c = 0; c < 3; ++c)
+                m[r * 3 + c] = A.at<double>(r, c);
+        *out_inliers = cv::countNonZero(inlierMask);
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_FindHomography(const Image2DAlg_OrbMatch* matches,
+                              int count, double ransac_reproj_threshold,
+                              double h[9], int* out_inliers) {
+    if (!matches || !h || !out_inliers) return -1;
+    if (count < 4) return -2;   // 单应最少 4 点（3 点欠定）
+    if (ransac_reproj_threshold <= 0.0) return -3;
+    *out_inliers = 0;
+    try {
+        std::vector<cv::Point2f> p1, p2;
+        MatchPointsOf(matches, count, p1, p2);
+        cv::Mat inlierMask;
+        // in1 → in2 方向（与 ORBAlign 的输出约定一致）；共线/退化返回空 Mat
+        cv::Mat H = cv::findHomography(p1, p2, inlierMask, cv::RANSAC,
+                                       ransac_reproj_threshold);
+        if (H.empty() || H.rows < 3 || H.cols < 3) return -2;
+        for (int r = 0; r < 3; ++r)
+            for (int c = 0; c < 3; ++c)
+                h[r * 3 + c] = H.at<double>(r, c);
+        *out_inliers = cv::countNonZero(inlierMask);
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+
 // ---------------- 多目标直线拟合（板边 / 边缘线测量） ----------------
 
 int Image2DAlg_FitLinesFromBinary(const Image2DAlg_Image* in,
@@ -2164,6 +2448,470 @@ int Image2DAlg_FitLinesFromBinary(const Image2DAlg_Image* in,
 
 void Image2DAlg_FreeLineFits(Image2DAlg_LineFit* lines) {
     free(lines);
+}
+
+
+// ---------------- 2.2.0：特征扩展（三检测器 / 斑点 / 一站式匹配，与 2.1.0 同风格） ----------------
+
+// 检测 + 描述一次完成（Brisk/Akaze/SiftFeatures 的公共实现，type 同 ComputeDescriptors）
+int DetectAndDescribeFeatures(const Image2DAlg_Image* in, int type, int n_features,
+                              double contrast_threshold,
+                              Image2DAlg_Point2f** out_points, int* out_count,
+                              Image2DAlg_Descriptors* out_desc) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!out_points || !out_count) return -1;
+    *out_points = nullptr;
+    *out_count = 0;
+    if (out_desc) {
+        out_desc->type = type;
+        out_desc->dim = 0;
+        out_desc->is_float = 0;
+        out_desc->count = 0;
+        out_desc->data = nullptr;
+        out_desc->fdata = nullptr;
+    }
+    try {
+        cv::Mat gray = GrayOf(src);
+        std::vector<cv::KeyPoint> kps;
+        cv::Mat desc;
+        MakeFeatureAlgorithm(type, n_features, contrast_threshold)
+            ->detectAndCompute(gray, cv::noArray(), kps, desc);
+        if (kps.empty()) return 0;   // 无检出属正常（平坦图），desc 亦为空
+        // 先分配点数组再填描述子：若反过来，点数组分配失败（-4）时 out_desc 已
+        // 持有 malloc 缓冲，失败出口不再是"输出全空"的干净状态；先分配 arr，
+        // 描述子缓冲分配失败 free(arr) 即可整体回滚
+        size_t bytes = sizeof(Image2DAlg_Point2f) * kps.size();
+        Image2DAlg_Point2f* arr = (Image2DAlg_Point2f*)malloc(bytes);
+        if (!arr) return -4;
+        if (out_desc && !desc.empty()) {
+            // detectAndCompute 自产关键点与描述子按行序一一对应
+            if (int rc = FillDescriptors(type, desc, out_desc)) {
+                free(arr);
+                return rc;
+            }
+        }
+        for (size_t i = 0; i < kps.size(); ++i) {
+            arr[i].x = kps[i].pt.x;
+            arr[i].y = kps[i].pt.y;
+        }
+        *out_points = arr;
+        *out_count = (int)kps.size();
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_BriskFeatures(const Image2DAlg_Image* in, int n_features,
+                             double contrast_threshold,
+                             Image2DAlg_Point2f** out_points, int* out_count,
+                             Image2DAlg_Descriptors* out_desc) {
+    return DetectAndDescribeFeatures(in, 1, n_features, contrast_threshold,
+                                     out_points, out_count, out_desc);
+}
+
+int Image2DAlg_AkazeFeatures(const Image2DAlg_Image* in, int n_features,
+                             double contrast_threshold,
+                             Image2DAlg_Point2f** out_points, int* out_count,
+                             Image2DAlg_Descriptors* out_desc) {
+    return DetectAndDescribeFeatures(in, 2, n_features, contrast_threshold,
+                                     out_points, out_count, out_desc);
+}
+
+int Image2DAlg_SiftFeatures(const Image2DAlg_Image* in, int n_features,
+                            double contrast_threshold,
+                            Image2DAlg_Point2f** out_points, int* out_count,
+                            Image2DAlg_Descriptors* out_desc) {
+    return DetectAndDescribeFeatures(in, 3, n_features, contrast_threshold,
+                                     out_points, out_count, out_desc);
+}
+
+int Image2DAlg_BlobDetect(const Image2DAlg_Image* in, double min_area, double max_area,
+                          double min_circularity, double min_convexity,
+                          Image2DAlg_BlobFeature** out_blobs, int* out_count) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!out_blobs || !out_count) return -1;
+    *out_blobs = nullptr;
+    *out_count = 0;
+    try {
+        // 四个过滤参数按接口约定构建，其余参数用 SimpleBlobDetector 默认
+        //（暗斑 blobColor=0 / 灰度阈值 50~220 步进 10 / 惯性比过滤 >= 0.1 / 重复性 2）。
+        // 注意：4.4 默认 Params 的凸性过滤是开启的（minConvexity=0.95，会滤掉
+        // 一般光栅化圆的锯齿轮廓）——本接口 <= 0 时显式关闭，保证“不过滤”语义可预期
+        cv::SimpleBlobDetector::Params params;
+        if (min_area > 0.0) {
+            params.minArea = (float)min_area;
+        } else {
+            params.minArea = 0.0f;   // <= 0 = 无下限
+        }
+        if (max_area > 0.0) {
+            params.maxArea = (float)max_area;
+        } else {
+            params.maxArea = std::numeric_limits<float>::max();   // <= 0 = 不设上限
+        }
+        if (min_circularity > 0.0) {   // > 0 启用圆度过滤
+            params.filterByCircularity = true;
+            params.minCircularity = (float)min_circularity;
+        } else {
+            params.filterByCircularity = false;   // <= 0 = 不过滤（显式关闭）
+        }
+        if (min_convexity > 0.0) {     // > 0 启用凸性过滤
+            params.filterByConvexity = true;
+            params.minConvexity = (float)min_convexity;
+        } else {
+            params.filterByConvexity = false;   // <= 0 = 不过滤（显式关闭，见上注）
+        }
+        cv::Mat gray = GrayOf(src);
+        cv::Ptr<cv::SimpleBlobDetector> det = cv::SimpleBlobDetector::create(params);
+        std::vector<cv::KeyPoint> kps;
+        det->detect(gray, kps);
+        if (kps.empty()) return 0;   // 无检出属正常
+        size_t bytes = sizeof(Image2DAlg_BlobFeature) * kps.size();
+        Image2DAlg_BlobFeature* arr = (Image2DAlg_BlobFeature*)malloc(bytes);
+        if (!arr) return -4;
+        for (size_t i = 0; i < kps.size(); ++i) {
+            arr[i].x = kps[i].pt.x;
+            arr[i].y = kps[i].pt.y;
+            // SimpleBlobDetector 的 KeyPoint.size = 斑点直径（含 1~2px 光栅化偏差），
+            // 取一半输出为半径
+            arr[i].radius = kps[i].size * 0.5f;
+        }
+        *out_blobs = arr;
+        *out_count = (int)kps.size();
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+void Image2DAlg_FreeBlobFeatures(Image2DAlg_BlobFeature* blobs) {
+    free(blobs);
+}
+
+int Image2DAlg_DetectAndMatch(const Image2DAlg_Image* in1, const Image2DAlg_Image* in2,
+                              int type, int n_features, double ratio,
+                              Image2DAlg_OrbMatch** out_matches, int* out_count) {
+    cv::Mat a, b;
+    if (!out_matches || !out_count) return -1;
+    if (int rc = Wrap(in1, a)) return rc;
+    if (int rc = Wrap(in2, b)) return rc;
+    if (type < 0 || type > 3) return -3;
+    if (ratio <= 0.0 || ratio >= 1.0) return -3;
+    *out_matches = nullptr;
+    *out_count = 0;
+    try {
+        cv::Mat g1 = GrayOf(a), g2 = GrayOf(b);
+        // 检测 + 描述（与 ComputeDescriptors 同款算子工厂；两图各做一次）
+        cv::Ptr<cv::Feature2D> algo = MakeFeatureAlgorithm(type, n_features, 0.0);
+        std::vector<cv::KeyPoint> kp1, kp2;
+        cv::Mat d1, d2;
+        algo->detectAndCompute(g1, cv::noArray(), kp1, d1);
+        algo->detectAndCompute(g2, cv::noArray(), kp2, d2);
+        if ((int)kp1.size() < 1 || (int)kp2.size() < 1 || d1.empty() || d2.empty()) return -2;
+        std::vector<cv::DMatch> good;
+        if (int rc = MatchDescriptorsLowe(d1, d2, type == 3, ratio, good)) return rc;
+        Image2DAlg_OrbMatch* arr =
+            (Image2DAlg_OrbMatch*)malloc(sizeof(Image2DAlg_OrbMatch) * good.size());
+        if (!arr) return -4;
+        for (size_t i = 0; i < good.size(); ++i) {
+            arr[i].x1 = kp1[good[i].queryIdx].pt.x;
+            arr[i].y1 = kp1[good[i].queryIdx].pt.y;
+            arr[i].x2 = kp2[good[i].trainIdx].pt.x;
+            arr[i].y2 = kp2[good[i].trainIdx].pt.y;
+            arr[i].distance = good[i].distance;
+        }
+        *out_matches = arr;
+        *out_count = (int)good.size();
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+
+// ---------------- 2.2.0：跟踪、配准与立体（video / calib3d 直接调用） ----------------
+
+int Image2DAlg_CalcOpticalFlowPyrLK(const Image2DAlg_Image* prev, const Image2DAlg_Image* next,
+                                    const Image2DAlg_Point2f* pts, int count,
+                                    int win_size, int max_level,
+                                    Image2DAlg_Point2f** out_pts, unsigned char* out_status) {
+    cv::Mat a, b;
+    if (!out_pts || !out_status) return -1;
+    if (int rc = Wrap(prev, a)) return rc;
+    if (int rc = Wrap(next, b)) return rc;
+    if (!pts) return -1;
+    if (count < 1) return -3;
+    if (a.rows != b.rows || a.cols != b.cols) return -3;
+    if (win_size <= 0) return -3;
+    if (max_level < 0) return -3;
+    win_size = OddAtLeast(win_size, 1);   // 偶数自动 +1（OpenCV 要求奇数窗口）
+    *out_pts = nullptr;
+    try {
+        cv::Mat g1 = GrayOf(a), g2 = GrayOf(b);
+        std::vector<cv::Point2f> pv;
+        pv.reserve(count);
+        for (int i = 0; i < count; ++i) pv.push_back(cv::Point2f(pts[i].x, pts[i].y));
+        std::vector<cv::Point2f> nv;
+        std::vector<unsigned char> st;
+        std::vector<float> err;
+        cv::calcOpticalFlowPyrLK(g1, g2, pv, nv, st, err,
+                                 cv::Size(win_size, win_size), max_level);
+        Image2DAlg_Point2f* arr = (Image2DAlg_Point2f*)malloc(sizeof(Image2DAlg_Point2f) * count);
+        if (!arr) return -4;
+        for (int i = 0; i < count; ++i) {
+            arr[i].x = nv[i].x;
+            arr[i].y = nv[i].y;
+            out_status[i] = st[i];   // 写入调用方预分配的 status 缓冲（一级指针契约）
+        }
+        *out_pts = arr;
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_FindTransformECC(const Image2DAlg_Image* templ, const Image2DAlg_Image* input,
+                                int motion_type, int max_iters, double epsilon,
+                                double m[9], double* out_correlation) {
+    cv::Mat a, b;
+    if (!m || !out_correlation) return -1;
+    if (int rc = Wrap(templ, a)) return rc;
+    if (int rc = Wrap(input, b)) return rc;
+    if (motion_type < 0 || motion_type > 2) return -3;
+    if (max_iters < 1) return -3;
+    if (epsilon <= 0.0) return -3;
+    if (a.rows != b.rows || a.cols != b.cols) return -3;
+    // 接口枚举 -> cv::MOTION_*（注意 cv 原生 1 是 EUCLIDEAN，本 API 不暴露欧氏模型）
+    const int cv_motion = (motion_type == 0) ? cv::MOTION_TRANSLATION
+                        : (motion_type == 1) ? cv::MOTION_AFFINE
+                                             : cv::MOTION_HOMOGRAPHY;
+    try {
+        cv::Mat t32, i32;
+        GrayOf(a).convertTo(t32, CV_32F);   // ECC 要求 CV_32F
+        GrayOf(b).convertTo(i32, CV_32F);
+        cv::Mat warp = (motion_type == 2) ? cv::Mat::eye(3, 3, CV_32F)
+                                          : cv::Mat::eye(2, 3, CV_32F);
+        double correlation = 0.0;
+        try {
+            correlation = cv::findTransformECC(t32, i32, warp, cv_motion,
+                                               cv::TermCriteria(cv::TermCriteria::COUNT +
+                                                                cv::TermCriteria::EPS,
+                                                                max_iters, epsilon));
+        } catch (const cv::Exception&) {
+            // OpenCV 对不收敛直接抛异常（4.4 文档："throws an exception if
+            // algorithm does not converges"）——按 -2（不收敛/相关性不足）口径
+            return -2;
+        }
+        if (!(correlation >= 0.5)) return -2;   // 迭代耗尽且相关性差/NaN（口径见头文件注释）
+        // 2x3（平移/仿射）写前 6 个并把 m[6..8] 清零——防止调用方误按 3x3 使用时
+        // 读到栈上残留值；单应路径 9 个全写
+        const int rows = (motion_type == 2) ? 3 : 2;
+        for (int r = 0; r < rows; ++r)
+            for (int c = 0; c < 3; ++c)
+                m[r * 3 + c] = warp.at<float>(r, c);
+        if (motion_type != 2) m[6] = m[7] = m[8] = 0.0;
+        *out_correlation = correlation;
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_PhaseCorrelate(const Image2DAlg_Image* a, const Image2DAlg_Image* b,
+                              double* out_dx, double* out_dy, double* out_response) {
+    cv::Mat ma, mb;
+    if (!out_dx || !out_dy || !out_response) return -1;
+    if (int rc = Wrap(a, ma)) return rc;
+    if (int rc = Wrap(b, mb)) return rc;
+    if (ma.rows != mb.rows || ma.cols != mb.cols) return -3;
+    try {
+        cv::Mat f1, f2;
+        GrayOf(ma).convertTo(f1, CV_32F);   // phaseCorrelate 要求 float
+        GrayOf(mb).convertTo(f2, CV_32F);
+        double response = 0.0;
+        // 窗口函数用默认（noArray）；getOptimalDFTSize 补边由 cv 内部完成
+        const cv::Point2d shift = cv::phaseCorrelate(f1, f2, cv::noArray(), &response);
+        *out_dx = shift.x;
+        *out_dy = shift.y;
+        *out_response = response;
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_StereoMatch(const Image2DAlg_Image* left, const Image2DAlg_Image* right,
+                           int min_disparity, int num_disparities, int block_size,
+                           Image2DAlg_Image* out_disparity) {
+    cv::Mat l, r;
+    if (int rc = Wrap(left, l)) return rc;
+    if (int rc = Wrap(right, r)) return rc;
+    if (!out_disparity) return -1;
+    if (!out_disparity->data) return -1;   // 调用方预分配（一级指针契约）
+    if (l.rows != r.rows || l.cols != r.cols) return -3;
+    if (num_disparities <= 0 || num_disparities % 16 != 0) return -3;
+    // 容器校验：尺寸与左右图一致、输出固定 1 通道（同 ToGray 容器约定）
+    if (out_disparity->width != l.cols || out_disparity->height != l.rows ||
+        out_disparity->channels != 1)
+        return -3;
+    block_size = OddAtLeast(block_size, 3);   // 奇数 >= 3
+    try {
+        cv::Mat gl = GrayOf(l), gr = GrayOf(r);
+        // P1/P2 按 OpenCV 推荐随 block 设定（8/32·block²），其余参数默认
+        cv::Ptr<cv::StereoSGBM> sgbm = cv::StereoSGBM::create(
+            min_disparity, num_disparities, block_size,
+            8 * block_size * block_size, 32 * block_size * block_size);
+        cv::Mat disp16;
+        sgbm->compute(gl, gr, disp16);   // CV_16S 定点（视差 * 16）
+        // 定标口径：/16 四舍五入得整数视差，钳到 [0,255]。
+        // 无效视差 -> 0：SGBM 以 (min_disparity-1)*16 填充匹配不可达的左条带，
+        // 该标记仅在 min_disparity <= 1 时落在负数区间（可被负值钳位兜住），
+        // min_disparity >= 2 时必须显式比对标记值，否则会以 1..n 的合法假象漏出
+        const int invalid_raw = (min_disparity - 1) * 16;
+        unsigned char* dstp = out_disparity->data;
+        for (int y = 0; y < disp16.rows; ++y) {
+            const short* row = disp16.ptr<short>(y);
+            unsigned char* outrow = dstp + (size_t)y * disp16.cols;
+            for (int x = 0; x < disp16.cols; ++x) {
+                const int raw = row[x];
+                if (raw == invalid_raw) {   // SGBM 无效视差标记 -> 0（契约见头文件）
+                    outrow[x] = 0;
+                    continue;
+                }
+                int v = (int)std::lround(raw / 16.0);
+                if (v < 0) v = 0;   // 其余越界负值一并钳到 0
+                if (v > 255) v = 255;
+                outrow[x] = (unsigned char)v;
+            }
+        }
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_SolvePnP(const double* object_points, const Image2DAlg_Point2f* image_points,
+                        int count, const double camera_matrix[9],
+                        const double* dist_coeffs, int dist_count,
+                        double rvec[3], double tvec[3]) {
+    if (!object_points || !image_points || !camera_matrix || !rvec || !tvec) return -1;
+    if (count < 4) return -2;   // PnP 最少 4 点（3 点欠定）
+    // dist_count 口径：<= 0 无畸变；OpenCV 支持的畸变模型 4/5/8/12/14 项。
+    // 其余正值 cv 内部断言必炸（而且会先对调用方短缓冲构造超长零拷贝视图造成
+    // 越界读），在此显式拦截，按模块约定返回 -3（参数取值不支持）
+    if (dist_count > 0 && dist_count != 4 && dist_count != 5 &&
+        dist_count != 8 && dist_count != 12 && dist_count != 14) return -3;
+    try {
+        // 3N double / Point2f 数组的紧排布局即 Nx1 CV_64FC3 / CV_32FC2（零拷贝视图）
+        cv::Mat obj(count, 1, CV_64FC3, (void*)object_points);
+        cv::Mat img(count, 1, CV_32FC2, (void*)image_points);
+        cv::Mat cam(3, 3, CV_64F, (void*)camera_matrix);
+        // dist_coeffs 为 NULL 或 dist_count <= 0 视为无畸变
+        cv::Mat dist = (dist_coeffs && dist_count > 0)
+                           ? cv::Mat(dist_count, 1, CV_64F, (void*)dist_coeffs)
+                           : cv::Mat();
+        cv::Mat rv, tv;
+        // 默认迭代法（SOLVEPNP_ITERATIVE）：精度优于纯线性解，4 点以上通用
+        if (!cv::solvePnP(obj, img, cam, dist, rv, tv, false, cv::SOLVEPNP_ITERATIVE))
+            return -2;   // 退化配置求解失败
+        for (int i = 0; i < 3; ++i) {
+            rvec[i] = rv.at<double>(i, 0);
+            tvec[i] = tv.at<double>(i, 0);
+        }
+        return 0;
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+// ---------------- 滤波扩展（2.3.0 新增） ----------------
+
+int Image2DAlg_Laplacian(const Image2DAlg_Image* in, int ksize, double scale,
+                         Image2DAlg_Image* out) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!out) return -1;
+    if (ksize != 1 && ksize != 3 && ksize != 5 && ksize != 7) return -3;
+    if (!(scale > 0.0)) return -3;
+    try {
+        cv::Mat dst;
+        const bool floatIn = (src.depth() == CV_32F || src.depth() == CV_64F);
+        if (floatIn) {
+            // 浮点输入：同深度直出（保留符号）
+            cv::Laplacian(src, dst, src.depth(), ksize, scale);
+        } else {
+            // 8U/16U：CV_16S 中间 -> |响应|×scale 饱和回原深度（负响应折叠，
+            // 工业边缘增强常用口径；需要符号信息时改用浮点输入）
+            cv::Mat mid;
+            cv::Laplacian(src, mid, CV_16S, ksize, scale);
+            cv::convertScaleAbs(mid, dst);
+        }
+        return CopyOut(dst, out);
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_Filter2D(const Image2DAlg_Image* in, const float* kernel, int ksize,
+                        Image2DAlg_Image* out) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!kernel || !out) return -1;
+    if (ksize < 1 || ksize > 51 || ksize % 2 == 0) return -3;
+    try {
+        cv::Mat kern(ksize, ksize, CV_32F, (void*)kernel);
+        cv::Mat dst;
+        const bool floatIn = (src.depth() == CV_32F || src.depth() == CV_64F);
+        if (floatIn) {
+            cv::filter2D(src, dst, src.depth(), kern);
+        } else {
+            // 8U/16U：CV_16S 中间（保留符号与幅值）-> |响应| 饱和回原深度
+            cv::Mat mid;
+            cv::filter2D(src, mid, CV_16S, kern);
+            cv::convertScaleAbs(mid, dst);
+        }
+        return CopyOut(dst, out);
+    } catch (const cv::Exception&) {
+        return -99;
+    }
+}
+
+int Image2DAlg_DenoiseNLMeans(const Image2DAlg_Image* in, double h, double h_color,
+                              int template_window, int search_window,
+                              Image2DAlg_Image* out) {
+    cv::Mat src;
+    if (int rc = Wrap(in, src)) return rc;
+    if (!out) return -1;
+    // 强度参数须为正（NLMeans 的 h 是噪声水平权重，<=0 无意义）；窗口先按
+    // 调用值比较（search 须 > template），再自动补奇（下限 3 / 补奇后仍严格大于）
+    if (!(h > 0.0) || !(h_color > 0.0)) return -3;
+    if (search_window <= template_window) return -3;
+    const int tw = OddAtLeast(template_window, 3);
+    const int sw = OddAtLeast(search_window, tw + 2);
+    try {
+        cv::Mat dst;
+        if (src.channels() == 1) {
+            cv::fastNlMeansDenoising(src, dst, (float)h, tw, sw);
+        } else if (src.channels() == 3) {
+            cv::fastNlMeansDenoisingColored(src, dst, (float)h, (float)h_color, tw, sw);
+        } else {
+            // 4 通道 BGRA：NLMeans 不支持 4 通道——拆 BGR 走 Colored 后回贴 alpha
+            std::vector<cv::Mat> ch;
+            cv::split(src, ch);
+            cv::Mat bgr, denoised;
+            cv::merge(std::vector<cv::Mat>{ch[0], ch[1], ch[2]}, bgr);
+            cv::fastNlMeansDenoisingColored(bgr, denoised, (float)h, (float)h_color, tw, sw);
+            std::vector<cv::Mat> out_ch;
+            cv::split(denoised, out_ch);
+            out_ch.push_back(ch[3]);
+            cv::merge(out_ch, dst);
+        }
+        return CopyOut(dst, out);
+    } catch (const cv::Exception&) {
+        return -99;
+    }
 }
 
 } // extern "C"

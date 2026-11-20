@@ -1691,6 +1691,12 @@ static void testImageProcessor()
 }
 
 // ---------------- CloudProcessor ----------------
+// 工单 002：本节起至文件尾的点云用例（CloudProcessor/Open3D 对照/契约/
+// 拟合配准变体/多点型/边界）全部依赖 PCL——无 PCL 构建时整段不编译。
+// SHAPELYALG_HAS_PCL 由 ShapelyAlg 目标在 PCL_FOUND 时 PUBLIC 定义，随
+// 测试 exe 链接传入，无需单独定义。
+
+#ifdef SHAPELYALG_HAS_PCL
 
 static void testCloudProcessor()
 {
@@ -1712,6 +1718,26 @@ static void testCloudProcessor()
     // 体素滤波（leaf 0.5 → 网格不变但离群点保留；用 1.0 验证降采样）
     CloudPtr voxel = CP::filterVoxelGrid(plane, 1.0);
     check(voxel && voxel->size() == 101, "filterVoxelGrid 1.0 → 101（网格合并+离群）");
+
+    // 近似体素（ApproximateVoxelGrid）：降采样生效、点数不增、与精确版同量级
+    CloudPtr avx = CP::filterApproxVoxelGrid(plane, 1.0);
+    check(avx && avx->size() >= 80 && avx->size() <= 110, "filterApproxVoxelGrid 降采样生效");
+    check(avx && avx->size() <= plane->size(), "filterApproxVoxelGrid 点数不增");
+
+    // 空间直线拟合（fitLine3D）：X 轴向 + 噪声
+    {
+        CloudPtr line(new pcl::PointCloud<pcl::PointXYZ>);
+        for (int i = 0; i < 100; ++i) {
+            float t = (float)i;
+            line->push_back(pcl::PointXYZ(t, (float)(i % 3) * 0.01f, (float)(i % 5) * 0.01f));
+        }
+        std::vector<float> lp, ld;
+        std::vector<int> li;
+        check(CP::fitLine3D(line, shapely::FitMethod::RANSAC, 0.05, lp, ld, li) &&
+              li.size() >= 90, "fitLine3D RANSAC 内点 >= 90/100");
+        check(ld.size() >= 3 && std::fabs(std::fabs(ld[0]) - 1.0) < 1e-3,
+              "fitLine3D 方向 ≈ ±X（|dx| = 1）");
+    }
 
     // 直通滤波：z ∈ [-0.1, 0.1] → 100 点（去离群）
     CloudPtr pt = CP::filterPassThrough(plane, "z", -0.1, 0.1);
@@ -1846,6 +1872,47 @@ static void testCloudProcessor()
           near(T[3], -0.5, 0.05), "registICP_PointToPoint 平移恢复");
     // PCA 配准
     check(CP::registPCA(shifted, pt, T) && near(T[3], -0.5, 0.1), "registPCA 平移恢复");
+
+    // 多尺度 ICP（Open3D multiscale_icp）：大初值偏差下单级 ICP 失准、金字塔配回。
+    // 特征地形 = 全局正弦波 + 局部高斯峰（保证 XY 平移可观测，纯平面不可观测）。
+    {
+        CloudPtr terrain(new Cloud);
+        for (double x = -5.0; x <= 5.0; x += 0.05)
+            for (double y = -5.0; y <= 5.0; y += 0.05) {
+                const double z = 0.5 * std::sin(0.7 * x) * std::cos(0.6 * y)
+                               + 0.6 * std::exp(-((x - 2.0) * (x - 2.0)
+                                                + (y - 1.5) * (y - 1.5)) / 2.0);
+                terrain->push_back(pcl::PointXYZ((float)x, (float)y, (float)z));
+            }
+        terrain->width = (uint32_t)terrain->size();
+        terrain->height = 1;
+        // source = target 经 T_true（平移 [1.5,-1,0.5] + 绕 Z 10°），初值偏差 ~2.4mm
+        const float c10 = 0.98480775f, s10 = 0.17364818f;
+        const float Ttrue[16] = { c10, -s10, 0, 1.5f,
+                                  s10,  c10, 0, -1.0f,
+                                  0,    0,   1, 0.5f,
+                                  0,    0,   0, 1 };
+        CloudPtr moved = CP::transApplyMatrix(terrain, Ttrue);
+        // 金字塔：粗级对应距离 2.0×2.5=5.0 覆盖初值偏差，细级 0.3×2.0=0.6 精修
+        float Tm[16] = { 0 };
+        const bool okM = CP::registMultiscaleICP(moved, terrain,
+                                                 { 2.5, 1.0, 0.3 }, { 80, 60, 60 },
+                                                 2.0, Tm);
+        check(okM, "registMultiscaleICP 金字塔收敛");
+        double fitM = 0.0, rmseM = 0.0;
+        CP::registEvaluate(moved, terrain, Tm, 0.15, fitM, rmseM);
+        // 平移模长旋转不变（行主序平移在 [3]/[7]/[11]）：应恢复 sqrt(3.5) ≈ 1.871
+        const double tm = std::sqrt((double)Tm[3] * Tm[3] + Tm[7] * Tm[7] + Tm[11] * Tm[11]);
+        check(near(tm, 1.871, 0.15), "multiscale 平移模长恢复");
+        check(fitM > 0.9 && rmseM < 0.1, "multiscale fitness/RMSE 达标");
+        // 对比：单级 ICP（同末级对应距离 0.3，无初值）无法从大初值恢复——
+        // 错配 RMSE 必大于金字塔精配（初值偏差 2.4mm ≫ 0.3 对应半径）
+        float Ts[16] = { 0 };
+        const bool okS = CP::registICP_PointToPoint(moved, terrain, 0.3, Ts);
+        double fitS = 0.0, rmseS = 0.0;
+        if (okS) CP::registEvaluate(moved, terrain, Ts, 0.15, fitS, rmseS);
+        check(!okS || rmseS > rmseM, "单级 ICP 大初值偏差失准（对比）");
+    }
 
     // Harris / ISS 关键点（平面无角点，仅验证不崩）
     CloudPtr harris = CP::keypointHarris3D(pt, 1.0, 1e-4);
@@ -4025,17 +4092,21 @@ static void testCloudProcessorEdgeCases()
     }
 }
 
+#endif // SHAPELYALG_HAS_PCL（点云用例段）
+
 int main()
 {
     testGeom();
     testStereo();
     testImageProcessor();
+#ifdef SHAPELYALG_HAS_PCL
     testCloudProcessor();
     testCloudProcessorOpen3D();
     testCloudProcessorContracts();
     testCloudProcessorFitRegistVariants();
     testCloudProcessorPointTypes();
     testCloudProcessorEdgeCases();
+#endif
     std::printf("\n%s（失败 %d 项）\n", g_fail == 0 ? "全部测试通过" : "存在失败", g_fail);
     return g_fail == 0 ? 0 : 1;
 }

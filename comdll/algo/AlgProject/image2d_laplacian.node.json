@@ -1,0 +1,58 @@
+{
+  "node": {
+    "id": "alg.image2d.laplacian",
+    "name": "Laplacian 边缘增强",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "Laplacian 二阶导边缘/纹理增强：输出 |响应| 灰度图（边缘亮、平坦黑）。与 Sobel（一阶导幅值）互补——对孤立点/细线更敏感、对噪声也更敏感，强噪声输入先接 blur；8U/16U 输入 CV_16S 中间取绝对值×scale 饱和回原深度（负响应折叠为正，工业边缘增强常用口径），浮点输入同深度保符号；ksize 1/3/5/7"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiLaplacian",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "ksize",
+      "label": "核边长",
+      "type": "int",
+      "default": 3,
+      "min": 1,
+      "max": 7,
+      "description": "核边长（1/3/5/7，其余报参数错）"
+    },
+    {
+      "name": "scale",
+      "label": "响应缩放",
+      "type": "number",
+      "default": 1.0,
+      "min": 0.001,
+      "max": 1000,
+      "description": "响应缩放系数（1 = 原始值；弱边缘可放大，强噪声场景可衰减）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "node": {
+    "id": "alg.point3d.sick_quality",
+    "name": "SICK 拼接质量自检",
+    "group": "IO",
+    "category": "源",
+    "description": "SICK 多相机拼接质量自检（产线每日标定漂移/丢帧诊断）：读扫描数据后统计相邻相机衔接带物理同位置格的 z 差（配对格数/差值均值/σ/最大|差|/超差数与占比），并带出设备数、原始宽×行、拼接行×列、有无强度；无输入无输出端口，结果并入节点消息；diff_threshold 为超差判定阈值(mm)；自检需 >=2 台相机（folder 用 ; 分隔多路径）"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiSickQuality",
+  "inputs": [],
+  "params": [
+    {
+      "name": "folder",
+      "label": "扫描数据文件夹",
+      "type": "path",
+      "default": "",
+      "description": "扫描数据文件夹；多相机用 ';' 分隔（如 Z:/ScanImage/3D;Z:/ScanImage/3D-2，顺序=相机序）"
+    },
+    {
+      "name": "frame",
+      "label": "指定帧(-1=全部)",
+      "type": "int",
+      "default": -1,
+      "min": -1,
+      "description": "指定帧号（>=0 只读每个相机第 frame 帧，按文件名顺序从 0 计；<0 = 全部帧）"
+    },
+    {
+      "name": "diff_threshold",
+      "label": "超差阈值(mm)",
+      "type": "number",
+      "default": 0.02,
+      "min": 0.0001,
+      "max": 1000000,
+      "description": "衔接带格级 z 差的超差判定阈值（mm，>0；|差|>阈值计超差格）"
+    },
+    {
+      "name": "recipe_path",
+      "label": "配方json(可空)",
+      "type": "path",
+      "default": "",
+      "description": "用户配方 json 路径（空 = 默认 Z:\\Calibrate\\3D\\MtxJuxin60003D.dll.user.json）"
+    },
+    {
+      "name": "common_path",
+      "label": "通用参数json(可空)",
+      "type": "path",
+      "default": "",
+      "description": "通用参数 json 路径（空 = 默认 Z:\\Juxin60003D_CommonParams.json）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/include/Point3DAlg_SickApi.h",
+      "src/Point3DAlg/include/Point3DAlg_SickReader.h",
+      "src/Point3DAlg/Point3DAlg_SickIO.cpp",
+      "src/Point3DAlg/Point3DAlg_SickReader.cpp",
+      "src/CommonAlg/include/CommonAlg_Json.h",
+      "thrid/nlohmann_json/single_include/nlohmann/json.hpp"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/include",
+      "src/CommonAlg/include",
+      "thrid/nlohmann_json/single_include"
+    ]
+  }
+}

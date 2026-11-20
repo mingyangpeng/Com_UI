@@ -1,0 +1,65 @@
+{
+  "node": {
+    "id": "alg.point3d.radius_search",
+    "name": "半径搜索",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "KdTree 半径搜索（query 查询点 + radius）：返回半径内全部近邻，按欧氏距离升序（距离为核心层开方口径）；无输出端口，消息恒以 radius/hits 开头并列出前 30 组 idx:dist；半径内无点属正常成功（hits=0，不报错）；定位：局部密度/邻域诊断"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiRadiusSearch",
+  "inputs": [
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "query_x",
+      "label": "查询点X",
+      "type": "number",
+      "default": 0.0,
+      "description": "查询点 X 坐标（与点云同单位）"
+    },
+    {
+      "name": "query_y",
+      "label": "查询点Y",
+      "type": "number",
+      "default": 0.0,
+      "description": "查询点 Y 坐标"
+    },
+    {
+      "name": "query_z",
+      "label": "查询点Z",
+      "type": "number",
+      "default": 0.0,
+      "description": "查询点 Z 坐标"
+    },
+    {
+      "name": "radius",
+      "label": "搜索半径",
+      "type": "number",
+      "default": 0.5,
+      "min": 1e-06,
+      "description": "搜索半径（>0，与点云坐标同单位；<=0 报参数非法）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

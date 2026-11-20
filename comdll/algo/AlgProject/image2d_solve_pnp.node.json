@@ -1,0 +1,53 @@
+{
+  "node": {
+    "id": "alg.image2d.solve_pnp",
+    "name": "PnP 位姿估计",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "2D-3D 位姿估计（solvePnP 迭代法）：输入 3D 物点与 2D 像点两组点集（数量相等、>=4 点一一对应）；camera_matrix 内参 9 值逗号分隔（fx,0,cx,0,fy,cy,0,0,1），畸变系数可选（4/5/8/12/14 值，空=无畸变）；rvec/tvec 与 Rodrigues 旋转矩阵 9 值并入节点消息（世界系→相机系）"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiSolvePnp",
+  "inputs": [
+    {
+      "name": "3D物点",
+      "type": "cloud"
+    },
+    {
+      "name": "2D像点",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "camera_matrix",
+      "label": "相机内参(9值)",
+      "type": "text",
+      "default": "",
+      "description": "内参 3x3 行主序 9 值逗号分隔：fx,0,cx,0,fy,cy,0,0,1"
+    },
+    {
+      "name": "dist_coeffs",
+      "label": "畸变系数(可选)",
+      "type": "text",
+      "default": "",
+      "description": "畸变系数（空 = 无畸变）：4/5/8/12/14 值逗号分隔（OpenCV 畸变模型）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

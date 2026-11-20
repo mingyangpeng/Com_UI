@@ -8,6 +8,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <random>
 #include <vector>
 
 using CloudXYZ = pcl::PointCloud<pcl::PointXYZ>;
@@ -34,6 +35,24 @@ static CloudXYZ::Ptr MakeDemo()
     slab(0.0, 6.0, 6.0, 20.0, 0.0, 0.4);
     slab(8.0, 12.0, 1.0, 5.0, 3.0, 0.3);
     slab(14.0, 18.0, 1.5, 4.5, 1.5, 0.3);
+    c->width = (uint32_t)c->size();
+    c->height = 1;
+    return c;
+}
+
+// 特征地形（大初值专项用例）：连续正弦波 + 局部高斯峰。
+// 域只含 ~1 个正弦周期 + 唯一峰（无重复纹理——ICP 会沿周期滑动到相邻波峰，
+// fitness 仍虚高 1.0）；无大平面（L 形板类平面对 XY 平移不可观测）。
+static CloudXYZ::Ptr MakeTerrain()
+{
+    CloudXYZ::Ptr c(new CloudXYZ);
+    for (double x = -5.0; x <= 5.0; x += 0.4)
+        for (double y = -5.0; y <= 5.0; y += 0.4) {
+            const double z = 0.5 * std::sin(0.7 * x) * std::cos(0.6 * y)
+                           + 0.6 * std::exp(-((x - 2.0) * (x - 2.0)
+                                            + (y - 1.5) * (y - 1.5)) / 2.0);
+            c->push_back(pcl::PointXYZ((float)x, (float)y, (float)z));
+        }
     c->width = (uint32_t)c->size();
     c->height = 1;
     return c;
@@ -172,9 +191,9 @@ int main()
         }
     }
 
-    // ---- 6 种策略 ----
+    // ---- 7 种策略 ----
     std::printf("\n-- 各策略（单位阵初值）--\n");
-    for (int k = 1; k <= 6; ++k) {
+    for (int k = 1; k <= 7; ++k) {
         Point3DAlg_RegistSession s;
         s = Point3DAlg_RegistSetStrategy(s, k).next;
         Point3DAlg_RegistStep st = Point3DAlg_RegistRun(s, src, dst, params);
@@ -229,6 +248,31 @@ int main()
         Point3DAlg_RegistStep st = Point3DAlg_RegistRun(s, src, dst, params);
         check(st.fitness >= 0.0 && MaxDiff(st.next.transform, truth) < 1e-4,
               "PCA 精确命中真值（绝对精度 < 1e-4）");
+    }
+
+    // ---- 策略 7 多尺度 ICP：初值偏差超出单级对应半径时的价值 ----
+    {
+        // 大初值：平移 [1.5,-1,0.5] + 8° 旋转（半宽 5 的地形边缘偏差 ~0.7mm）→ 总偏差 ~2.6mm。
+        // max_dist=1.25：单级对应半径 1.25 < 2.6 锁不住；
+        // 金字塔 {2.5, 1.0, 0.375} 粗级对应距离 1.5×2.5=3.75 > 2.6 覆盖，
+        // 且粗级 voxel 2.5 ≤ 域尺度/4（地形幅度 ~1.1mm 不被压平）
+        CloudXYZ::Ptr big = MakeTerrain();
+        float truth2[16];
+        MakeTruth(truth2, 8.0, 1.5, -1.0, 0.5);
+        CloudXYZ::Ptr movedBig = Point3DAlg_RegistApplyTransform(big, truth2);
+        Point3DAlg_RegistParams pb;
+        pb.max_correspondence_dist = 1.25;
+        Point3DAlg_RegistSession s1, s7;
+        s1 = Point3DAlg_RegistSetStrategy(s1, POINT3DALG_REGIST_ICP_P2P).next;
+        s7 = Point3DAlg_RegistSetStrategy(s7, POINT3DALG_REGIST_MULTISCALE).next;
+        // 语义与轮跑一致：dst = truth·src，Run(src, dst) 恢复 truth
+        Point3DAlg_RegistStep st1 = Point3DAlg_RegistRun(s1, big, movedBig, pb);
+        Point3DAlg_RegistStep st7 = Point3DAlg_RegistRun(s7, big, movedBig, pb);
+        const double err1 = (st1.fitness >= 0.0) ? MaxDiff(st1.next.transform, truth2) : 1e9;
+        const double err7 = (st7.fitness >= 0.0) ? MaxDiff(st7.next.transform, truth2) : 1e9;
+        std::printf("  大初值: 单级 err=%.4f fitness=%.4f | 金字塔 err=%.4f fitness=%.4f\n",
+                    err1, st1.fitness, err7, st7.fitness);
+        check(st7.fitness > 0.0 && err7 < err1, "大初值下金字塔优于单级 ICP");
     }
 
     std::printf("\n%s（失败 %d 项）\n", g_fail == 0 ? "全部测试通过" : "存在失败", g_fail);

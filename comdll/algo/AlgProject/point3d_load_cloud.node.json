@@ -1,0 +1,61 @@
+{
+  "node": {
+    "id": "alg.point3d.load_cloud",
+    "name": "点云文件加载",
+    "group": "IO",
+    "category": "源",
+    "description": "加载 PCD/PLY/TXT 点云文件：TXT 每行 x<分隔符>y<分隔符>z，'#' 注释行跳过、非数字/NaN/Inf 行整行跳过；点数并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiLoadCloud",
+  "inputs": [],
+  "params": [
+    {
+      "name": "path",
+      "label": "点云文件路径",
+      "type": "path",
+      "default": "",
+      "description": "点云文件路径（.pcd / .ply / .txt）"
+    },
+    {
+      "name": "type",
+      "label": "文件类型",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 2,
+      "description": "0=PCD(PCL 原生) 1=PLY 2=TXT(每行 x<分隔符>y<分隔符>z)"
+    },
+    {
+      "name": "delimiter",
+      "label": "TXT分隔符",
+      "type": "text",
+      "default": "",
+      "description": "仅 TXT 生效：字段分隔符（如 \" \" 或 \",\"；空 = 按连续空白切分）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "点云",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudIO.h",
+      "src/ShapelyAlg/CloudIO.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <!-- 编译完成后把插件输出复制到 comdll/ui/NodeGraph -->
-  <Target Name="CopyToComdll" AfterTargets="Build">
+  <Target Name="CopyToComdll" AfterTargets="Build" Condition="'$(SkipCopyToComdll)' != 'true'">
     <ItemGroup>
       <_PluginOutputs Include="$(OutDir)*.*" Exclude="$(OutDir)ComUI.Sdk.*" />
     </ItemGroup>

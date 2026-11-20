@@ -22,7 +22,7 @@ public sealed class GlCloudRenderer : IDisposable
     private sealed class Entity
     {
         public required string Id;
-        public int Vao, PosVbo, ColVbo, SelVbo;
+        public int Vao, PosVbo, ColVbo, SelVbo, NrmVbo;
         public int Count, Cap;
         public nint NativePts, NativeCol;   // 非托管点/色缓冲（worker 拷贝后供 GL 消费；Dispose 时释放）
         public bool Visible = true;
@@ -31,6 +31,10 @@ public sealed class GlCloudRenderer : IDisposable
         public float PointSize = 3f;
         public Matrix4 Xform = Matrix4.Identity;   // 行向量约定（与 MVP 一致）
         public Vector3 SingleColor = new(0.7f, 0.75f, 0.8f);
+        public float? ColorMin, ColorMax;       // 伪彩色带域（null=用实体 Bounds——色带范围可调）
+        public bool HasNormals;                 // 法线 attribute 已上传（location 3）
+        public bool Lit;                        // 光照模式（法线 Lambert；无法线自动回退平光）
+        public float[]? NormalsRef;             // 托管法线引用（导出用；同 Id 重发后由视图重传）
     }
 
     private NativeWindow? _win;
@@ -47,6 +51,7 @@ public sealed class GlCloudRenderer : IDisposable
         public Vector3 BoundsMin, BoundsMax;
         public float[]? Pts;       // 托管源数组（仅 Begin 引用；拷入原生后即可被 GC 回收）
         public byte[]? Col;
+        public float[]? Nrm;       // 逐点法线（可选；Begin 时与点同布局重建 NrmVbo）
         public int Start, N;
     }
 
@@ -68,7 +73,9 @@ public sealed class GlCloudRenderer : IDisposable
 
     /// <summary>某实体全部块上传完成（worker 线程触发，订阅方需自行调度回 UI 线程）。</summary>
     public event Action<string, Vector3, Vector3>? UploadCompleted;
-    private int _uMvp, _uModel, _uMode, _uMinY, _uMaxY, _uPointSize, _uSingle, _uEyeDist, _uStride, _uSelColor;
+    private int _uMvp, _uModel, _uMode, _uMinY, _uMaxY, _uPointSize, _uSingle, _uEyeDist, _uStride, _uSelColor, _uClipOn, _uClipLo, _uClipHi, _uClipAxis, _uLit, _uLightStrength;
+    private float _lightStrength = 1f;   // 法线光照强度（0=平光 1=全光照）
+    private (int Axis, float Lo, float Hi)? _zClip;   // 切片带（轴 0=X 1=Y 2=Z；null=不切片）——状态式，Draw 每帧上传
     private int _fbo, _fboTex, _fboDepth;
     private int _vpW, _vpH;
     private float[] _posScratch = Array.Empty<float>();
@@ -100,9 +107,16 @@ public sealed class GlCloudRenderer : IDisposable
             if (allowBackgroundWorker)
                 StartBackgroundUploader();
         }
-        catch
+        catch (Exception ex)
         {
-            // 无 GL 环境走软件回退
+            // 无 GL 环境走软件回退；记录真实异常，便于诊断"无 GL 上下文"（如上下文数量耗尽）
+            try
+            {
+                var log = System.IO.Path.Combine(AppContext.BaseDirectory, "gl_init_error.log");
+                System.IO.File.AppendAllText(log,
+                    $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] GlCloudRenderer ctor failed (allowBg={allowBackgroundWorker}): {ex}\n");
+            }
+            catch { }
         }
     }
 
@@ -184,6 +198,7 @@ public sealed class GlCloudRenderer : IDisposable
         GL.BufferData(BufferTarget.ArrayBuffer, job.Count * 3, e.NativeCol, BufferUsageHint.StaticDraw);
         GL.BindBuffer(BufferTarget.ArrayBuffer, e.SelVbo);
         GL.BufferData(BufferTarget.ArrayBuffer, job.Count, new byte[job.Count], BufferUsageHint.DynamicDraw);
+        BindNormalBuffer(e, job.Count, job.Nrm);   // 法线随点重分配（旧 Cap 与新 normals 不再错位/越界）
         GL.BindVertexArray(0);
         e.Cap = job.Count;
         e.Count = 0;
@@ -215,6 +230,7 @@ public sealed class GlCloudRenderer : IDisposable
             GL.DeleteBuffer(e.PosVbo);
             GL.DeleteBuffer(e.ColVbo);
             GL.DeleteBuffer(e.SelVbo);
+            if (e.NrmVbo != 0) GL.DeleteBuffer(e.NrmVbo);
         }
         catch { }
         // 释放非托管点/色缓冲（漏了 = 每删一个大云泄漏数百 MB）
@@ -235,6 +251,12 @@ public sealed class GlCloudRenderer : IDisposable
         _uEyeDist = GL.GetUniformLocation(_prog, "uEyeDist");
         _uStride = GL.GetUniformLocation(_prog, "uStride");
         _uSelColor = GL.GetUniformLocation(_prog, "uSelColor");
+        _uClipOn = GL.GetUniformLocation(_prog, "uClipOn");
+        _uClipLo = GL.GetUniformLocation(_prog, "uClipLo");
+        _uClipHi = GL.GetUniformLocation(_prog, "uClipHi");
+        _uClipAxis = GL.GetUniformLocation(_prog, "uClipAxis");
+        _uLit = GL.GetUniformLocation(_prog, "uLit");
+        _uLightStrength = GL.GetUniformLocation(_prog, "uLightStrength");
 
         GL.Enable(EnableCap.DepthTest);
         GL.DepthFunc(DepthFunction.Lequal);
@@ -273,7 +295,7 @@ public sealed class GlCloudRenderer : IDisposable
     // ==================== 分块上传 ====================
 
     /// <summary>开始某实体的上传：不存在则建实体壳（VAO/VBO），入队 worker 完成数据拷贝与显存预分配；同 Id 重发=更新。</summary>
-    public void BeginUpload(string id, int count, Vector3 boundsMin, Vector3 boundsMax, float[] points, byte[]? colorsRgb)
+    public void BeginUpload(string id, int count, Vector3 boundsMin, Vector3 boundsMax, float[] points, byte[]? colorsRgb, float[]? normals = null)
     {
         if (!_ok || count <= 0) return;
         _win?.MakeCurrent();
@@ -305,7 +327,7 @@ public sealed class GlCloudRenderer : IDisposable
             // worker：原生拷贝（托管数组→NativeMemory）+ 一次性 BufferData；UI 零阻塞
             // 注意：Cap 不得在 UI 线程提前改——显存缓冲要等 worker BeginUploadGl 分配并设置，
             // 提前放大 Cap 会让 SetRevealed/DrawArrays 越界读旧尺寸缓冲（GPU 未定义行为）
-            _jobs?.Add(new UploadJob { Ent = e, Begin = true, Count = count, Pts = points, Col = colorsRgb, BoundsMin = boundsMin, BoundsMax = boundsMax });
+            _jobs?.Add(new UploadJob { Ent = e, Begin = true, Count = count, Pts = points, Col = colorsRgb, Nrm = normals, BoundsMin = boundsMin, BoundsMax = boundsMax });
             return;
         }
         e.Cap = count;   // 同步路径：缓冲已分配，Cap 立即生效
@@ -316,7 +338,29 @@ public sealed class GlCloudRenderer : IDisposable
         GL.BufferData(BufferTarget.ArrayBuffer, count * 3, IntPtr.Zero, BufferUsageHint.StaticDraw);
         GL.BindBuffer(BufferTarget.ArrayBuffer, e.SelVbo);
         GL.BufferData(BufferTarget.ArrayBuffer, count, new byte[count], BufferUsageHint.DynamicDraw);
+        BindNormalBuffer(e, count, normals);
         GL.BindVertexArray(0);
+    }
+
+    /// <summary>法线 VBO 重建（Begin 场景随点数据重分配，杜绝旧 Cap 与新 normals 的越界读写；normals 空=移除光照数据）。</summary>
+    private void BindNormalBuffer(Entity e, int count, float[]? normals)
+    {
+        if (normals is not null && normals.Length >= count * 3)
+        {
+            if (e.NrmVbo == 0) e.NrmVbo = GL.GenBuffer();
+            GL.BindBuffer(BufferTarget.ArrayBuffer, e.NrmVbo);
+            GL.BufferData(BufferTarget.ArrayBuffer, count * 12, normals, BufferUsageHint.StaticDraw);
+            GL.EnableVertexAttribArray(3);
+            GL.VertexAttribPointer(3, 3, VertexAttribPointerType.Float, false, 12, 0);
+            e.HasNormals = true;
+            e.NormalsRef = normals;
+        }
+        else
+        {
+            if (e.NrmVbo != 0) { GL.DeleteBuffer(e.NrmVbo); e.NrmVbo = 0; }
+            e.HasNormals = false;
+            e.NormalsRef = null;
+        }
     }
 
     /// <summary>上传一块（start = 起始点索引，按 Id 定位实体）。完成后实体 Count = start + n，可渐进绘制；
@@ -341,6 +385,56 @@ public sealed class GlCloudRenderer : IDisposable
         e.Count = start + n;
         e.BoundsMin = boundsMin;
         e.BoundsMax = boundsMax;
+    }
+
+    /// <summary>上传逐点法线（float[3·count] SoA，一次性 BufferData + 启用 location=3 attribute）。云点数不变时可反复调用（重算覆盖）。</summary>
+    public void SetNormals(string id, float[] normals)
+    {
+        // Cap<=0（后台 BeginUploadGl 尚未完成）时静默等就绪——否则会建空缓冲且 HasNormals 误置位
+        if (!_ok || !_entities.TryGetValue(id, out var e) || e.Cap <= 0 || normals.Length < e.Cap * 3) return;
+        _win?.MakeCurrent();
+        GL.BindVertexArray(e.Vao);
+        BindNormalBuffer(e, e.Cap, normals);   // BufferData 重分配（点数未变 → 等价覆盖；杜绝旧 Cap 越界）
+        GL.BindVertexArray(0);
+    }
+
+    /// <summary>伪彩色带域覆盖（数据 Y 坐标；任一 null = 回退实体包围盒域）——薄高度差场景拉满对比度。</summary>
+    public void SetEntityColorRange(string id, float? lo, float? hi)
+    {
+        if (_entities.TryGetValue(id, out var e))
+        {
+            if (lo is not null && hi is not null) { e.ColorMin = lo; e.ColorMax = hi; }
+            else { e.ColorMin = null; e.ColorMax = null; }
+        }
+    }
+
+    /// <summary>单独设置实体点大小（快捷键 ± 步进；不动颜色模式）。</summary>
+    public void SetEntityPointSize(string id, float size)
+    {
+        if (_entities.TryGetValue(id, out var e)) e.PointSize = Math.Clamp(size, 1f, 10f);
+    }
+
+    /// <summary>法线光照强度（0=平光 1=全光照；全局统一，Lit 开启的实体生效）。</summary>
+    public void SetLightStrength(float strength)
+    {
+        _lightStrength = Math.Clamp(strength, 0f, 1f);
+    }
+
+    /// <summary>实体光照开关（无 normals 的实体自动回退平光）。</summary>
+    public void SetEntityLit(string id, bool lit)
+    {
+        if (_entities.TryGetValue(id, out var e)) e.Lit = lit;
+    }
+
+    public bool TryGetNormals(string id, out float[]? normals)
+    {
+        if (_entities.TryGetValue(id, out var e) && e.HasNormals && e.NormalsRef is not null)
+        {
+            normals = e.NormalsRef;
+            return true;
+        }
+        normals = null;
+        return false;
     }
 
     /// <summary>上传逐点选区掩码（0/255），选中的点用高亮色绘制。</summary>
@@ -390,6 +484,7 @@ public sealed class GlCloudRenderer : IDisposable
                 GL.DeleteBuffer(e.PosVbo);
                 GL.DeleteBuffer(e.ColVbo);
                 GL.DeleteBuffer(e.SelVbo);
+                if (e.NrmVbo != 0) GL.DeleteBuffer(e.NrmVbo);
             }
             catch { }
         }
@@ -400,30 +495,50 @@ public sealed class GlCloudRenderer : IDisposable
 
     // ==================== 绘制 ====================
 
+    /// <param name="travel">沿视线（fwd）推进量：&gt;0 相机持续前进、可越过 target 穿行到点云背面；
+    /// 0 为原始位置。注视方向恒为 fwd，因此穿行时不会回头看 target（符合"一直往前靠近背面点"的直觉）。</param>
+    /// <summary>切片带（axis 0=X 1=Y(高度) 2=Z；null=关闭切片）。渲染器状态式：每帧 Draw 自动上传，GPU 侧过滤零 CPU 成本。</summary>
+    public void SetZClip(int axis, float? lo, float? hi)
+    {
+        if (lo is not null && hi is not null && lo < hi) _zClip = (Math.Clamp(axis, 0, 2), lo.Value, hi.Value);
+        else _zClip = null;
+    }
+
     public void Draw(int vw, int vh,
         Quaternion cam, float dist, Vector3 target, bool ortho,
-        int stride, byte[] dest)
+        int stride, byte[] dest, float farClip = 0, float sceneRadius = 0, float travel = 0)
     {
         if (!_ok) return;
         _win?.MakeCurrent();
         EnsureFbo(vw, vh);
 
         var fwd = Vector3.Transform(-Vector3.UnitZ, cam);
-        var eye = target - fwd * dist;
+        // 相机沿视线前进 travel：travel=0 时 eye=target-fwd*dist、LookAt 方向恰为 fwd（与原行为一致）。
+        // travel>0 越过中心继续朝 fwd 前进；注视点取 eye+fwd（方向恒为 fwd，穿行时不回头）。
+        float eyeDist = dist - travel;
+        var eye = target - fwd * eyeDist;
         var up = Vector3.Transform(Vector3.UnitY, cam);
-        var view = Matrix4.LookAt(eye, target, up);
+        var view = Matrix4.LookAt(eye, eye + fwd, up);
 
         float aspect = vw / (float)vh;
+        // near 用固定小值（dist 为初始适配距离、不再随滚轮缩小）：贴近点时不会被近裁剪面切掉。
+        float near = MathF.Max(dist * 1e-4f, 1e-6f);
+        // far 覆盖整个场景：dist 固定为初始适配距离，eye 前进后前方最远点不超过场景直径，
+        // max(dist*100, dist+半径*4) 足够大；用户 farClip>0 时以其为下限（仍保证覆盖场景）。
+        float cover = dist + sceneRadius * 4f;
+        float far = farClip > 0 ? MathF.Max(farClip, cover) : MathF.Max(cover, dist * 100f);
+        far = MathF.Max(far, near * 2f);
         Matrix4 proj;
         if (ortho)
         {
-            float halfH = dist * MathF.Tan(MathF.PI / 8);
+            // 正交模式也随推进量缩放（eyeDist 越小视野越大），用绝对值兼容越过中心后的情形。
+            float halfH = MathF.Max(MathF.Abs(eyeDist), 1e-4f) * MathF.Tan(MathF.PI / 8);
             float halfW = halfH * aspect;
-            proj = Matrix4.CreateOrthographicOffCenter(-halfW, halfW, -halfH, halfH, 0.001f, dist * 100);
+            proj = Matrix4.CreateOrthographicOffCenter(-halfW, halfW, -halfH, halfH, near, far);
         }
         else
         {
-            proj = Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(45f), aspect, 0.001f, dist * 100);
+            proj = Matrix4.CreatePerspectiveFieldOfView(MathHelper.DegreesToRadians(45f), aspect, near, far);
         }
         var mvp = view * proj;
         LastMvp = mvp;
@@ -437,15 +552,21 @@ public sealed class GlCloudRenderer : IDisposable
         GL.Uniform1(_uEyeDist, dist);
         GL.Uniform1(_uStride, stride);
         GL.Uniform3(_uSelColor, 1.0f, 0.15f, 1.0f);   // 选区高亮：洋红（jet 色带中不存在的色相）
+        GL.Uniform1(_uClipOn, _zClip is not null ? 1 : 0);
+        GL.Uniform1(_uClipLo, _zClip?.Lo ?? 0f);
+        GL.Uniform1(_uClipHi, _zClip?.Hi ?? 0f);
+        GL.Uniform1(_uClipAxis, _zClip?.Axis ?? 1);
 
         foreach (var e in _entities.Values)
         {
             if (!e.Visible || e.Count == 0) continue;
-            GL.Uniform1(_uMinY, e.BoundsMin.Y);
-            GL.Uniform1(_uMaxY, e.BoundsMax.Y);
+            GL.Uniform1(_uMinY, e.ColorMin ?? e.BoundsMin.Y);
+            GL.Uniform1(_uMaxY, e.ColorMax ?? e.BoundsMax.Y);
             GL.Uniform1(_uMode, e.ColorMode);
             GL.Uniform1(_uPointSize, e.PointSize);
             GL.Uniform3(_uSingle, e.SingleColor.X, e.SingleColor.Y, e.SingleColor.Z);
+            GL.Uniform1(_uLit, e.Lit && e.HasNormals ? 1 : 0);
+            GL.Uniform1(_uLightStrength, _lightStrength);
             var model = e.Xform;
             GL.UniformMatrix4(_uModel, false, ref model);
             GL.BindVertexArray(e.Vao);
@@ -485,6 +606,7 @@ public sealed class GlCloudRenderer : IDisposable
 layout(location=0) in vec3 aPos;
 layout(location=1) in vec3 aColor;
 layout(location=2) in float aSel;
+layout(location=3) in vec3 aNormal;
 uniform mat4 uMVP;
 uniform mat4 uModel;
 uniform float uMinY;
@@ -492,26 +614,41 @@ uniform float uMaxY;
 uniform float uPointSize;
 uniform float uEyeDist;
 uniform int uStride;
+uniform int uClipOn;
+uniform float uClipLo;
+uniform float uClipHi;
+uniform int uClipAxis;   // 0=X 1=Y(height) 2=Z
 out vec3 vColor;
 out float vHeightT;
 out float vSel;
+out vec3 vNormal;
 void main() {
     gl_Position = uMVP * uModel * vec4(aPos, 1.0);
     if (uStride > 1 && gl_VertexID % uStride != 0)
         gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
+    if (uClipOn == 1)
+    {
+        float cv = uClipAxis == 0 ? aPos.x : (uClipAxis == 1 ? aPos.y : aPos.z);
+        if (cv < uClipLo || cv > uClipHi)
+            gl_Position = vec4(0.0, 0.0, -2.0, 1.0);   // slice: move out-of-range points off clip volume (GPU filter)
+    }
     gl_PointSize = uPointSize * (uEyeDist / max(gl_Position.w, 0.1));
     vHeightT = (aPos.y - uMinY) / max(uMaxY - uMinY, 1e-6);
     vColor = aColor;
     vSel = aSel;
+    vNormal = aNormal;
 }";
 
     private const string FragSrc = @"#version 330 core
 in vec3 vColor;
 in float vHeightT;
 in float vSel;
+in vec3 vNormal;
 uniform int uMode;
 uniform vec3 uSingle;
 uniform vec3 uSelColor;
+uniform int uLit;
+uniform float uLightStrength;
 out vec4 oColor;
 vec3 jet(float t) {
     t = clamp(t, 0.0, 1.0);
@@ -523,11 +660,23 @@ vec3 jet(float t) {
 void main() {
     vec3 c = uMode == 0 ? vColor : (uMode == 1 ? jet(vHeightT) : uSingle);
     if (vSel > 0.5) c = uSelColor;
+    // normal lighting (half-lambert + ambient floor): length guard (entities without normals read (0,0,0), fall back to flat)
+    float nl = length(vNormal);
+    if (uLit == 1 && nl > 0.5 && uLightStrength > 0.001)
+    {
+        vec3 n = vNormal / nl;
+        float diff = max(dot(n, normalize(vec3(0.25, -0.92, 0.30))), 0.0);
+        c = mix(c, c * (0.45 + 0.55 * diff), clamp(uLightStrength, 0.0, 1.0));
+    }
     oColor = vec4(c, 1.0);
 }";
 
     private static int Build(string vs, string fs)
     {
+        // GLSL 源码禁止非 ASCII 字符：NVIDIA 编译器遇到中文会 internal corruption（C0000/C9000），
+        // 报错只给 <EOF> 无法定位——这里提前拦截并指出具体行，见 docs/BUGS.md（GLSL 中文注释坑）
+        CheckAscii(vs, "VertexSrc");
+        CheckAscii(fs, "FragSrc");
         int v = GL.CreateShader(ShaderType.VertexShader);
         GL.ShaderSource(v, vs); GL.CompileShader(v);
         int f = GL.CreateShader(ShaderType.FragmentShader);
@@ -538,6 +687,13 @@ void main() {
         if (ok == 0) throw new Exception("shader link: " + GL.GetProgramInfoLog(p));
         GL.DeleteShader(v); GL.DeleteShader(f);
         return p;
+    }
+
+    private static void CheckAscii(string src, string name)
+    {
+        for (int i = 0; i < src.Length; i++)
+            if (src[i] > 127)
+                throw new Exception($"{name}: GLSL contains non-ASCII char '{src[i]}' (U+{(int)src[i]:X4}) — Chinese comments break the NVIDIA GLSL compiler");
     }
 
     public unsafe void Dispose()
@@ -563,6 +719,7 @@ void main() {
                     GL.DeleteBuffer(e.PosVbo);
                     GL.DeleteBuffer(e.ColVbo);
                     GL.DeleteBuffer(e.SelVbo);
+                    if (e.NrmVbo != 0) GL.DeleteBuffer(e.NrmVbo);
                     if (e.NativePts != 0) NativeMemory.Free((void*)e.NativePts);
                     if (e.NativeCol != 0) NativeMemory.Free((void*)e.NativeCol);
                 }

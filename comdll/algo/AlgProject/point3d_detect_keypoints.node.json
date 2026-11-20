@@ -1,0 +1,68 @@
+{
+  "node": {
+    "id": "alg.point3d.detect_keypoints",
+    "name": "点云关键点",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "点云关键点检测：type 0=Harris3D（radius=邻域搜索半径，threshold=响应阈值>=0 越小保留越多，NMS 恒开）1=ISS3D（radius=显著性半径>0 典型点距数倍，threshold=非极大值抑制半径>0 典型<radius）；输出关键点云（无颜色，查看器按高度伪彩上色），数量并入节点消息；理想解析曲面 ISS3D 恒 0 检出属已知限制"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiDetectKeypoints",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "type",
+      "label": "关键点类型",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "0=Harris3D 1=ISS3D"
+    },
+    {
+      "name": "radius",
+      "label": "半径",
+      "type": "number",
+      "default": 0.5,
+      "min": 0.0001,
+      "max": 1000000,
+      "description": "Harris3D：邻域搜索半径（>0）/ ISS3D：显著性半径（>0，典型取点距数倍）"
+    },
+    {
+      "name": "threshold",
+      "label": "阈值",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 1000000,
+      "description": "Harris3D：响应阈值（>=0，越小保留越多）/ ISS3D：非极大值抑制半径（须 >0，典型 < radius）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "关键点",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

@@ -1,0 +1,167 @@
+{
+  "node": {
+    "id": "alg.point3d.segment_cloud",
+    "name": "点云分割聚类",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "点云分割/聚类（method 0~4）：0=主平面RANSAC分割(恒2段：平面内点+其余) 1=欧式聚类 2=DBSCAN密度聚类(噪声丢弃) 3=区域生长(内部自动估计法线) 4=多平面迭代；输出点数最多的一段点云（输出端口静态、无法声明可变段数），总段数与各段点数并入节点消息；平面方程等详情接 fit_model 另取；未用参数保持默认跳过"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiSegmentCloud",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "分割方法",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 4,
+      "description": "0=planeRANSAC主平面分割 1=euclideanCluster欧式聚类 2=dbscan密度聚类 3=regionGrowing区域生长 4=planesMulti多平面迭代"
+    },
+    {
+      "name": "distance_threshold",
+      "label": "平面距离阈值(方法0/4)",
+      "type": "number",
+      "default": 0.05,
+      "min": 0.0001,
+      "max": 1000000,
+      "description": "method 0/4：平面分割距离阈值（>0）"
+    },
+    {
+      "name": "cluster_tolerance",
+      "label": "聚类容差(方法1)",
+      "type": "number",
+      "default": 0.2,
+      "min": 0.0001,
+      "max": 1000000,
+      "description": "method 1：欧式聚类容差（>0，典型 2~5 倍点距）"
+    },
+    {
+      "name": "min_size",
+      "label": "最小簇点数(方法1)",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 100000000,
+      "description": "method 1：最小簇点数（>=1）"
+    },
+    {
+      "name": "max_size",
+      "label": "最大簇点数(方法1)",
+      "type": "number",
+      "default": 1000000,
+      "min": 1,
+      "max": 100000000,
+      "description": "method 1：最大簇点数（>= 最小簇点数）"
+    },
+    {
+      "name": "eps",
+      "label": "邻域半径(方法2)",
+      "type": "number",
+      "default": 0.2,
+      "min": 0.0001,
+      "max": 1000000,
+      "description": "method 2：DBSCAN eps 邻域半径（>0）"
+    },
+    {
+      "name": "min_points",
+      "label": "核心点邻居数(方法2)",
+      "type": "number",
+      "default": 5,
+      "min": 1,
+      "max": 100000000,
+      "description": "method 2：核心点最小邻居数（>=1，含自身）"
+    },
+    {
+      "name": "k_neighbors",
+      "label": "近邻个数(方法3)",
+      "type": "number",
+      "default": 10,
+      "min": 3,
+      "max": 1000,
+      "description": "method 3：区域生长近邻个数（>=3，兼作内部法线估计的 KNN 数）"
+    },
+    {
+      "name": "smoothness_deg",
+      "label": "法线夹角阈值(方法3)",
+      "type": "number",
+      "default": 10,
+      "min": 0.001,
+      "max": 180,
+      "description": "method 3：相邻点法线夹角阈值（度，>0，越小区域越平）"
+    },
+    {
+      "name": "curvature_thresh",
+      "label": "曲率阈值(方法3)",
+      "type": "number",
+      "default": 1,
+      "min": 0,
+      "max": 1000000,
+      "description": "method 3：曲率阈值（>=0，超过则不并入区域）"
+    },
+    {
+      "name": "min_size_rg",
+      "label": "最小区域点数(方法3)",
+      "type": "number",
+      "default": 10,
+      "min": 1,
+      "max": 100000000,
+      "description": "method 3：最小区域点数（>=1）"
+    },
+    {
+      "name": "max_size_rg",
+      "label": "最大区域点数(方法3)",
+      "type": "number",
+      "default": 1000000,
+      "min": 1,
+      "max": 100000000,
+      "description": "method 3：最大区域点数（>= 最小区域点数）"
+    },
+    {
+      "name": "max_planes",
+      "label": "最多平面数(方法4)",
+      "type": "number",
+      "default": 2,
+      "min": 1,
+      "max": 1000,
+      "description": "method 4：最多检出的平面数（>=1）"
+    },
+    {
+      "name": "min_inliers",
+      "label": "最少平面内点(方法4)",
+      "type": "number",
+      "default": 100,
+      "min": 3,
+      "max": 100000000,
+      "description": "method 4：每个平面最少内点数（>=3）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "最大段",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

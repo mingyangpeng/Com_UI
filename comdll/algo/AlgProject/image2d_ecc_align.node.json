@@ -1,0 +1,66 @@
+{
+  "node": {
+    "id": "alg.image2d.ecc_align",
+    "name": "ECC 图像对齐",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "ECC 迭代最大化增强相关系数对齐（cv::findTransformECC，亚像素精度、对光照变化较稳）：输入模板图/待配准图（尺寸须一致）；变换矩阵（m 方向=模板坐标取 input(m·x)，即 warpAffine(input, m, WARP_INVERSE_MAP) 对齐到模板）与相关系数并入节点消息；不收敛/相关性<0.5 报错（两图无结构或形变过大属正常，可重试）"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiEccAlign",
+  "inputs": [
+    {
+      "name": "模板图",
+      "type": "image"
+    },
+    {
+      "name": "待配准图",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "motion",
+      "label": "变换模型",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 2,
+      "description": "0=平移(2x3) 1=仿射(2x3) 2=单应(3x3)（注意与 cv::MOTION_* 原生枚举取值不同：cv 的 1 是欧氏，本 API 未暴露欧氏模型）"
+    },
+    {
+      "name": "max_iters",
+      "label": "迭代上限",
+      "type": "int",
+      "default": 50,
+      "min": 1,
+      "max": 500,
+      "description": "ECC 迭代上限（越大越慢、越可能收敛）"
+    },
+    {
+      "name": "epsilon",
+      "label": "收敛阈值",
+      "type": "number",
+      "default": 1e-05,
+      "min": 1e-09,
+      "max": 0.1,
+      "description": "收敛阈值（相邻迭代相关系数增量，典型 1e-5）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

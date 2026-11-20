@@ -32,6 +32,19 @@
 //   2.0.0  + 特征点族（HarrisCorners / GoodFeatures / CornerSubPix）+
 //            ORBAlign（ORB 特征匹配 + RANSAC 仿射对位——大形变对位）+
 //            ApproxPolyDP（多边形拟合）/ FitRectsFromBinary（多目标旋转矩形）
+//   2.1.0  + 特征链路拆分（FastFeatures FAST 检测 / ComputeDescriptors 描述子计算
+//            ORB·BRISK·AKAZE·SIFT / MatchFeatures Lowe 比率匹配 /
+//            EstimateAffinePartial 部分仿射 / FindHomography 单应）——
+//            与 ORBAlign 一站式并存，检测/描述/匹配/几何估计可独立复用
+//   2.2.0  + 特征扩展（BriskFeatures / AkazeFeatures / SiftFeatures 检测+描述
+//            一次完成 / BlobDetect 斑点检测 + BlobFeature + FreeBlobFeatures /
+//            DetectAndMatch 一站式检测+描述+匹配，复用 OrbMatch）+
+//            跟踪配准立体族（CalcOpticalFlowPyrLK 光流 / FindTransformECC 对齐 /
+//            PhaseCorrelate 平移估计 / StereoMatch 双目视差 / SolvePnP 位姿）
+//
+//   2.3.0  + 滤波扩展（Laplacian 算子 / Filter2D 自定义卷积核——中值/双边/
+//            高斯已由 Blur method 0/1/2 覆盖，不另设入口避免语义漂移）+
+//            DenoiseNLMeans 非局部均值降噪
 //
 // 【通道语义】Image2DAlg_Image.channels 支持 1（灰度）/ 3（BGR）/ 4（BGRA），
 //   data 为紧排像素（行步长 = width * channels，无对齐填充）：
@@ -45,6 +58,9 @@
 // 【错误码】（除 Free* / GetVersion 外统一返回 int）
 //   0    成功
 //   -1   空指针或空图（in/out 为 NULL、data 为空、宽高 <= 0）
+//   -2   特征/匹配/估计不足（特征族：无检出关键点、匹配对数过少、几何估计
+//        无法求解；跟踪配准族：ECC 不收敛或相关性不足、PnP 求解失败；
+//        ReadImage 例外——-2 为打开失败）
 //   -3   通道数 / 模式枚举 / 参数取值不支持（如 2 通道、mode 越界、ROI 为空）
 //   -4   内存不足（malloc 失败）
 //   -99  OpenCV 内部异常（已在 C 边界统一捕获，异常不跨 DLL）
@@ -708,8 +724,11 @@ IMAGE2DALG_EXPORT int Image2DAlg_MatchShapes(const float* xy1, int count1,
 /// [in]  xy/count      轮廓点集（count >= 3，否则 -3）
 /// [out] out_defects   malloc 数组（用 Image2DAlg_FreeDefects 释放）
 /// [out] out_count     数量；无凹陷（凸形）时 *out_defects = NULL、*out_count = 0、仍返回 0
-/// 点序自适应：内部保证逆时针后再算凸包，若输入为顺时针会先反转，
-/// 返回的 *index 均以调整后的点序为准。
+/// 点序自适应：内部按有向面积归一化遍历方向（顺时针轮廓先反转再计算），
+/// 返回的 *index 已统一映射回【输入点序】（start/end/farthest 皆然，可安全用于回切输入点集）。
+/// 输入须为简单多边形遍历序（findContours 输出天然满足）；自交/乱序点集会触发
+/// OpenCV 断言、以 -99 返回（见错误码）。共线等退化输入（凸包 <3 点）按无凹陷
+/// 返回 0/NULL/0。整数轮廓上深度 <~0.5px 的微缺陷属取整噪声，可按 depth 过滤。
 typedef struct Image2DAlg_Defect {
     int start_index;       // 凹陷段起始顶点（输入点序）
     int end_index;         // 凹陷段结束顶点
@@ -749,7 +768,8 @@ IMAGE2DALG_EXPORT void Image2DAlg_FreeDefects(Image2DAlg_Defect* defects);
 
 // ---------------- 几何变换（标定对齐 / 坐标校正用） ----------------
 
-/// 仿射变换：dst(x,y) = src(M · [x,y,1]ᵀ)。
+/// 仿射变换：M 为 src→dst 的前向映射（cv::warpAffine 默认语义，非 WARP_INVERSE_MAP）——
+///                      dst(x,y) 采样自 src(M⁻¹·[x,y,1]ᵀ)，越界填 0。可直接使用
 /// [in]  m              2x3 矩阵行主序 [m00,m01,m02,m10,m11,m12]（6 元素，可为
 ///                      cv::getRotationMatrix2D / getAffineTransform 的输出）
 /// [in]  out_w/out_h   输出画布尺寸（<= 0 → -3）
@@ -882,6 +902,395 @@ IMAGE2DALG_EXPORT int Image2DAlg_ORBAlign(const Image2DAlg_Image* in1,
                                           int* out_inliers);
 
 IMAGE2DALG_EXPORT void Image2DAlg_FreeOrbMatches(Image2DAlg_OrbMatch* matches);
+
+
+// ---------------- 特征链路拆分（检测 / 描述 / 匹配 / 几何估计，2.1.0 新增） ----------------
+
+/// FAST 角点检测（圆周连续像素比较，比 Harris 快一个数量级，适合实时/视频前处理）。
+/// 彩色输入先转灰度。
+/// [in]  threshold           灰度差阈值（典型 10~40；<= 0 → -3）
+/// [in]  nonmax_suppression  非极大值抑制开关（0 关闭；非 0 开启去重）
+/// [out] out_points          malloc 数组（用 Image2DAlg_FreePoint2f 释放）；
+///                           无检出时 *out_points = NULL、*out_count = 0、仍返回 0
+///                           （纯平坦图无检出属正常，不是错误）
+/// [out] out_count           检出点数
+/// 返回：0 成功；-1 空指针/空图；-3 参数越界；-4 内存不足；-99 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_FastFeatures(const Image2DAlg_Image* in,
+                                              int threshold, int nonmax_suppression,
+                                              Image2DAlg_Point2f** out_points, int* out_count);
+
+/// 描述子容器（Image2DAlg_ComputeDescriptors 的输出；data/fdata 由本库 malloc）。
+///   type      0=ORB 1=BRISK 2=AKAZE 3=SIFT（与 ComputeDescriptors 的 type 参数一致）
+///   dim       单描述子字节数（二进制）或 float 维数（SIFT 浮点）
+///   is_float  1 = 浮点描述子（SIFT，读 fdata）；0 = 二进制描述子（读 data）
+///   count     描述子个数（= 输入关键点数）
+///   data      is_float=0 时有效：count*dim 字节
+///   fdata     is_float=1 时有效：count*dim 个 float
+typedef struct Image2DAlg_Descriptors {
+    int type;             // 0=ORB 1=BRISK 2=AKAZE 3=SIFT
+    int dim;              // 单描述子字节数（二进制）或 float 维数（SIFT）
+    int is_float;         // 1=SIFT 浮点描述子
+    int count;            // 描述子个数（= 输入关键点数）
+    unsigned char* data;  // is_float=0：count*dim 字节
+    float* fdata;         // is_float=1：count*dim 个 float（与 data 二选一）
+} Image2DAlg_Descriptors;
+
+/// 关键点描述子计算（检测与描述解耦：关键点可来自 FAST/Harris/GoodFeatures
+/// 或外部跟踪器；一次检测可多次匹配）。彩色输入先转灰度。
+/// [in]  in          灰度语义图
+/// [in]  pts/count   关键点（count >= 1，否则 -3；坐标须在图像内，越界 → -2；
+///                   贴边点由本库复制边框扩图计算，可正常出描述子——-2 仅在
+///                   算子仍丢弃关键点时返回）
+/// [in]  type        0=ORB(二进制 32 字节) / 1=BRISK(二进制 64 字节) /
+///                   2=AKAZE(二进制 61 字节) / 3=SIFT(浮点 128 维)；
+///                   越界 → -3。注意：匹配时两套描述子 type 必须严格一致
+/// [in]  n_features  仅 ORB 有效（<= 0 取默认 500，同 ORBAlign）；其他类型忽略
+/// [out] out         调用方分配的结构体，本库填充字段；data/fdata 用
+///                   Image2DAlg_FreeDescriptors 释放（结构体本身归调用方）。
+///                   内存归属注记：重复调用前须先 FreeDescriptors（本库不释放
+///                   旧缓冲，否则泄漏）；校验失败（-1/-2/-3）不动 out 原有内容
+/// 返回：0 成功；-1 空指针/空图；-2 关键点越界/算子丢弃导致无法计算描述子；
+///       -3 参数/枚举越界；-4 内存不足；-99 OpenCV 异常。
+/// 注：SIFT 自 OpenCV 4.4.0 起进入主库 features2d（专利到期），本库
+///     opencv_world440 已导出 cv::SIFT::create，可直接使用（无需 contrib/nonfree）；
+///     AKAZE 对输入关键点统一按基尺度（原始分辨率尺度空间层）计算描述子。
+IMAGE2DALG_EXPORT int Image2DAlg_ComputeDescriptors(const Image2DAlg_Image* in,
+                                                    const Image2DAlg_Point2f* pts, int count,
+                                                    int type, int n_features,
+                                                    Image2DAlg_Descriptors* out);
+
+/// 释放描述子缓冲（free data/fdata 并各自置空；结构体本身由调用方管理；
+/// NULL 安全，可重复调用）。
+IMAGE2DALG_EXPORT void Image2DAlg_FreeDescriptors(Image2DAlg_Descriptors* d);
+
+/// 描述子匹配：BFMatcher kNN(k=2) + Lowe 比率测试（保留 d1 < ratio*d2 的配对）。
+/// 二进制描述子（ORB/BRISK/AKAZE）用 Hamming 距离，浮点（SIFT）用 L2 距离。
+/// [in]  d1/d2        两套描述子（type/dim/is_float 必须一致，否则 -3）
+/// [in]  pts1/pts2    与 d1/d2 行序一一对应的关键点（pts1[i] 即 d1 第 i 行的
+///                   关键点，pts2[i] 即 d2 第 i 行——即 ComputeDescriptors 的输入
+///                   点集；数组长度须 >= d1/d2 的 count，本库无法校验，不足属
+///                   调用方错误）
+/// [in]  ratio        Lowe 比率系数（典型 0.7~0.8；不在 (0,1) → -3）
+/// [out] out_matches  malloc 匹配点对数组（复用 Image2DAlg_OrbMatch 结构，
+///                   用 Image2DAlg_FreeOrbMatches 释放）：
+///                   x1/y1 = 图1 关键点，x2/y2 = 图2 对应点，
+///                   distance = 描述子距离（Hamming 或 L2，随 is_float）
+/// [out] out_count    比率测试后匹配对数
+/// 返回：0 成功；-1 空指针；-2 匹配对数 < 2（平坦图属正常）；
+///       -3 参数越界或两描述子 type/dim/is_float 不一致；-4 内存不足；-99 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_MatchFeatures(const Image2DAlg_Descriptors* d1,
+                                               const Image2DAlg_Descriptors* d2,
+                                               const Image2DAlg_Point2f* pts1,
+                                               const Image2DAlg_Point2f* pts2,
+                                               double ratio,
+                                               Image2DAlg_OrbMatch** out_matches,
+                                               int* out_count);
+
+/// 部分仿射估计（4 自由度：旋转 + 各向同性尺度 + 平移）——比 ORBAlign 的
+/// 全仿射（6 DOF）约束更强、抗误匹配更稳，工业视觉对位首选。
+/// [in]  matches/count            匹配点对（如 MatchFeatures / ORBAlign 输出；
+///                                  count >= 3，否则 -2）
+/// [in]  ransac_reproj_threshold  RANSAC 重投影阈值（像素，典型 3.0；<= 0 → -3）
+/// [out] m                        2x3 行主序，方向 in1 → in2（与 ORBAlign 一致：
+///                                  图1 点 → 图2 点，可直接接 WarpAffine）；
+///                                  返回非 0 时不写入（保持调用方原值）
+/// [out] out_inliers              RANSAC 内点数（>= 10 视为可靠）；校验通过后
+///                                  清零，求解失败/异常时为 0
+/// 返回：0 成功；-1 空指针；-2 点数不足或无法求解；-3 参数越界；
+///       -99 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_EstimateAffinePartial(const Image2DAlg_OrbMatch* matches,
+                                                       int count,
+                                                       double ransac_reproj_threshold,
+                                                       double m[6], int* out_inliers);
+
+/// 单应矩阵估计（3x3 透视变换，配合 WarpPerspective 做平面拼接/大视角对位）。
+/// [in]  matches/count            匹配点对（count >= 4，否则 -2）
+/// [in]  ransac_reproj_threshold  同 EstimateAffinePartial（<= 0 → -3）
+/// [out] h                        3x3 行主序，方向 in1 → in2（h[8] 归一为 1）；
+///                                  返回非 0 时不写入（保持调用方原值）
+/// [out] out_inliers              RANSAC 内点数；校验通过后清零，
+///                                  求解失败/异常时为 0
+/// 返回：0 成功；-1 空指针；-2 点数不足或退化（如所有点共线）；-3 参数越界；
+///       -99 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_FindHomography(const Image2DAlg_OrbMatch* matches,
+                                                int count,
+                                                double ransac_reproj_threshold,
+                                                double h[9], int* out_inliers);
+
+
+// ---------------- 特征扩展（BRISK / AKAZE / SIFT 检测+描述、斑点、一站式匹配，2.2.0 新增） ----------------
+
+// 【contrast_threshold 映射表】三个检测+描述一次完成接口的同一参数：
+//   BriskFeatures -> BRISK::create 的 thresh（int，典型 30；<= 0 取默认 30）
+//   AkazeFeatures -> AKAZE::create 的 threshold（float，典型 0.001；<= 0 取默认
+//                    0.001，值越小检出越多）
+//   SiftFeatures  -> SIFT::create 的 contrastThreshold（典型 0.04；<= 0 取默认
+//                    0.04，越大检出越少）
+
+/// BRISK 特征（检测 + 描述一次完成：尺度空间极值 + 二进制 64 字节描述子，
+/// 旋转/尺度鲁棒、速度快）。彩色输入先转灰度。
+/// [in]  n_features         特征点上限——本接口忽略（BRISK 无上限参数）
+/// [in]  contrast_threshold 见上方映射表（BRISK thresh，int 取整）
+/// [out] out_points         malloc 数组（用 Image2DAlg_FreePoint2f 释放）；
+///                          无检出时 *out_points = NULL、*out_count = 0、仍返回 0
+///                          （平坦图无检出属正常，不是错误）
+/// [out] out_count          检出点数
+/// [out] out_desc           调用方分配的结构体，本库填充字段（data/fdata 缓冲用
+///                          Image2DAlg_FreeDescriptors 释放，结构体本身归调用方）；
+///                          传 NULL = 只检测不取描述子
+/// 内存契约：out_points 为二级指针（本库 malloc 配 FreePoint2f）；out_desc 为
+/// 一级结构体指针（调用方分配，其 data/fdata 缓冲由本库 malloc 配 FreeDescriptors）。
+/// 失败语义：-1 校验失败不写任何输出；-4/-99 时 *out_points/*out_count 已置
+/// NULL/0、out_desc 已清零（本库保证失败出口无残留缓冲）。
+/// 返回：0 成功；-1 空指针/空图；-4 内存不足；-99 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_BriskFeatures(const Image2DAlg_Image* in, int n_features,
+                                               double contrast_threshold,
+                                               Image2DAlg_Point2f** out_points, int* out_count,
+                                               Image2DAlg_Descriptors* out_desc);
+
+/// AKAZE 特征（检测 + 描述一次完成：非线性扩散尺度空间 + 二进制 61 字节描述子，
+/// 弱纹理/模糊场景优于 ORB）。彩色输入先转灰度。
+/// [in]  n_features         特征点上限——本接口忽略（AKAZE 无上限参数）
+/// [in]  contrast_threshold 见上方映射表（AKAZE threshold，float）
+/// 其余同 BriskFeatures（out_desc 为 AKAZE 描述子；关键点由 detectAndCompute
+/// 自产，无 ComputeDescriptors 对外部关键点的 class_id 约束）。
+IMAGE2DALG_EXPORT int Image2DAlg_AkazeFeatures(const Image2DAlg_Image* in, int n_features,
+                                               double contrast_threshold,
+                                               Image2DAlg_Point2f** out_points, int* out_count,
+                                               Image2DAlg_Descriptors* out_desc);
+
+/// SIFT 特征（检测 + 描述一次完成：DoG 尺度空间 + 浮点 128 维描述子，
+/// 匹配质量最高、视角/尺度变化最稳）。彩色输入先转灰度。
+/// [in]  n_features         特征点上限 -> SIFT::create 的 nfeatures（<= 0 不限）
+/// [in]  contrast_threshold 见上方映射表（SIFT contrastThreshold）
+/// 其余同 BriskFeatures（out_desc 为浮点描述子：is_float=1、fdata 有效）。
+/// 注：SIFT 自 OpenCV 4.4.0 起进入主库 features2d（同 ComputeDescriptors 的说明）。
+IMAGE2DALG_EXPORT int Image2DAlg_SiftFeatures(const Image2DAlg_Image* in, int n_features,
+                                              double contrast_threshold,
+                                              Image2DAlg_Point2f** out_points, int* out_count,
+                                              Image2DAlg_Descriptors* out_desc);
+
+/// 斑点检测（SimpleBlobDetector：灰度多阈值二值化 -> 连通域 -> 形状过滤聚合）。
+/// 与 FitCirclesFromBinary 的语义区分：本接口 = 连通域形状过滤（多阈值聚合，
+/// 按面积/圆度/凸性/惯性比筛选，快速定位圆点/焊盘）；FitCirclesFromBinary =
+/// 二值前景逐轮廓最小二乘圆拟合（精度更高、可选亚像素细化）。快速定位用本
+/// 接口，精密测量用拟合接口。
+/// [in]  min_area          面积过滤下限（像素²；<= 0 = 无下限）
+/// [in]  max_area          面积过滤上限（<= 0 = 不设上限，同 ConnectedComponents 约定）
+/// [in]  min_circularity   最小圆度 [0,1]（> 0 启用圆度过滤；<= 0 显式关闭圆度过滤）
+/// [in]  min_convexity     最小凸性 [0,1]（> 0 启用凸性过滤；<= 0 显式关闭凸性过滤）
+///       其余参数用 SimpleBlobDetector 默认：暗斑（blobColor=0，亮斑请先反转）、
+///       灰度阈值 50~220 步进 10、惯性比过滤 >= 0.1、重复性 >= 2。
+///       注：4.4 默认 Params 的凸性过滤开启（minConvexity=0.95，会滤掉一般
+///       光栅化圆的锯齿轮廓），故圆度/凸性过滤状态由本接口的参数显式决定
+/// [out] out_blobs         malloc 数组（用 Image2DAlg_FreeBlobFeatures 释放）；
+///                         无检出时 *out_blobs = NULL、*out_count = 0、仍返回 0；
+///                         -4/-99 时同样置空（-1 校验失败不写输出）
+/// [out] out_count         斑点数
+/// 返回：0 成功；-1 空指针/空图；-3 通道不支持；-4 内存不足；-99 OpenCV 异常。
+typedef struct Image2DAlg_BlobFeature {
+    float x, y;      // 斑点中心（像素）
+    float radius;    // 斑点半径（像素，直径/2——SimpleBlobDetector 的尺寸为斑点
+                     // 直径，含 1~2px 光栅化偏差）
+} Image2DAlg_BlobFeature;
+
+IMAGE2DALG_EXPORT int Image2DAlg_BlobDetect(const Image2DAlg_Image* in,
+                                            double min_area, double max_area,
+                                            double min_circularity, double min_convexity,
+                                            Image2DAlg_BlobFeature** out_blobs, int* out_count);
+
+/// 释放斑点检测结果数组（直接 free 指针本身；NULL 安全；调用方自行置空）。
+IMAGE2DALG_EXPORT void Image2DAlg_FreeBlobFeatures(Image2DAlg_BlobFeature* blobs);
+
+/// 一站式特征检测 + 描述 + 匹配（ORBAlign 的泛化版：ORB/BRISK/AKAZE/SIFT 四选一）。
+/// 内部 = 检测（detectAndCompute）+ 描述（ComputeDescriptors 同款算子工厂）+
+/// 匹配（MatchFeatures 同款 BFMatcher kNN + Lowe 比率）；给不想管理描述子
+/// 生命周期的调用方——需要复用描述子/关键点时用拆分版接口。
+/// [in]  type        0=ORB / 1=BRISK / 2=AKAZE / 3=SIFT（同 ComputeDescriptors
+///                   枚举；越界 -> -3）
+/// [in]  n_features  特征点上限：ORB 有效（<= 0 取默认 500，与 ORBAlign 内部
+///                   参数一致——ORBAlign 本身要求 > 0）；SIFT 有效（<= 0 不限）；
+///                   BRISK/AKAZE 无上限参数，忽略
+/// [in]  ratio       Lowe 比率系数（典型 0.7~0.8；不在 (0,1) -> -3）
+/// [out] out_matches  malloc 匹配点对数组（复用 Image2DAlg_OrbMatch 结构，
+///                   用 Image2DAlg_FreeOrbMatches 释放）：
+///                   x1/y1 = 图1 关键点，x2/y2 = 图2 对应点，distance = 描述子距离；
+///                   -4/-99 时 *out_matches/*out_count 已置 NULL/0
+/// [out] out_count   比率测试后匹配对数
+/// 返回：0 成功；-1 空指针/空图；-2 特征/匹配不足（任一图无检出关键点或
+///       比率测试后 < 2 对——平坦图属正常）；-3 参数越界；-4 内存不足；
+///       -99 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_DetectAndMatch(const Image2DAlg_Image* in1,
+                                                const Image2DAlg_Image* in2,
+                                                int type, int n_features, double ratio,
+                                                Image2DAlg_OrbMatch** out_matches,
+                                                int* out_count);
+
+
+// ---------------- 跟踪、配准与立体（2.2.0 新增） ----------------
+
+/// 金字塔 LK 光流跟踪（视频帧间点跟踪、运动分析；cv::calcOpticalFlowPyrLK）。
+/// [in]  prev/next   前后两帧（彩色先转灰度；尺寸须一致，否则 -3）
+/// [in]  pts/count   待跟踪点（count >= 1，否则 -3）
+/// [in]  win_size    搜索窗边长（典型 21；<= 0 -> -3；偶数自动 +1）
+/// [in]  max_level   金字塔层数（典型 3；< 0 -> -3）
+/// [out] out_pts     跟踪后的新位置（malloc 数组，用 Image2DAlg_FreePoint2f 释放）；
+///                   跟踪失败的点位置无意义，以 out_status 为准；
+///                   -1/-3 校验失败不写任何输出，-4/-99 时 *out_pts 已置 NULL
+/// [out] out_status  一级指针契约——调用方预分配 count 字节（本库不分配该缓冲）；
+///                   status[i] 非 0 = 第 i 点跟踪成功、0 = 丢失；NULL -> -1；
+///                   仅返回 0 时写入（非 0 返回保持调用方原值，不应采信）
+/// 返回：0 成功；-1 空指针/空图（含 out_status 为 NULL）；-2 无（本接口不判
+///       特征不足）；-3 参数越界（win_size <= 0 / max_level < 0 / count < 1 /
+///       两图尺寸不一致）；-4 内存不足；-99 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_CalcOpticalFlowPyrLK(const Image2DAlg_Image* prev,
+                                                      const Image2DAlg_Image* next,
+                                                      const Image2DAlg_Point2f* pts, int count,
+                                                      int win_size, int max_level,
+                                                      Image2DAlg_Point2f** out_pts,
+                                                      unsigned char* out_status);
+
+/// ECC 图像对齐（迭代最大化增强相关系数，亚像素精度、对光照变化较稳；
+/// cv::findTransformECC）。
+/// [in]  templ/input   模板图与输入图（彩色先转灰度、内部转 CV_32F；
+///                     尺寸须一致，否则 -3）
+/// [in]  motion_type   0=平移(2x3) / 1=仿射(2x3) / 2=单应(3x3)；越界 -> -3
+///                     （注意与 cv::MOTION_* 原生枚举取值不同：cv 的 1 是
+///                     MOTION_EUCLIDEAN，本 API 未暴露欧氏模型）
+/// [in]  max_iters     迭代上限（< 1 -> -3）
+/// [in]  epsilon       收敛阈值（相邻迭代相关系数增量，典型 1e-5；<= 0 -> -3）
+/// [out] m             变换矩阵行主序，OpenCV ECC 方向：模板坐标 x 处取
+///                     input(m·x)——即 warpAffine(input, m, WARP_INVERSE_MAP)
+///                     可将 input 对齐到 templ（单应接 WarpPerspective 同理）；
+///                     motion_type 0/1 为 2x3——仅前 6 个有效，m[6..8] 清零
+///                     （防误按 3x3 使用时读到残留值）；返回非 0 时 m 不写入
+/// [out] out_correlation  对齐后相关系数（越接近 1 越好）；返回非 0 时不写入
+/// 返回：0 成功；-1 空指针/空图；-2 不收敛/相关性不足（判定口径：OpenCV 抛出
+///       ECC 不收敛异常，或返回相关系数 < 0.5——两图无结构/形变过大属正常，
+///       调用方可重试）；-3 参数越界；-99 其余 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_FindTransformECC(const Image2DAlg_Image* templ,
+                                                  const Image2DAlg_Image* input,
+                                                  int motion_type, int max_iters,
+                                                  double epsilon, double m[9],
+                                                  double* out_correlation);
+
+/// 相位相关平移估计（FFT 频域互功率谱相位斜率，对光照/亮度变化极稳、亚像素
+/// 精度；cv::phaseCorrelate）。
+/// [in]  a/b          两张图（彩色先转灰度、内部转 CV_32F；尺寸须一致否则 -3）
+/// [out] out_dx/out_dy  平移量（b 内容相对 a 移动的像素数：b = a 平移
+///                     (dx,dy) 后的图 -> 输出 (dx,dy)）；返回非 0 时不写入
+/// [out] out_response  峰值响应 [0,1]（5x5 质心区域能量占比，越接近 1 越
+///                     单峰可信；典型 > 0.3 可信）
+/// 返回：0 成功；-1 空指针/空图；-3 尺寸不一致；-99 OpenCV 异常。
+/// 注：不启用窗口函数（cv 默认 noArray），强边缘效应场景由调用方先平滑。
+IMAGE2DALG_EXPORT int Image2DAlg_PhaseCorrelate(const Image2DAlg_Image* a,
+                                                const Image2DAlg_Image* b,
+                                                double* out_dx, double* out_dy,
+                                                double* out_response);
+
+/// 双目立体匹配（SGBM 半全局块匹配输出视差图；配合 Image2DAlg_Calib.h 的立体
+/// 校正结果可转深度；cv::StereoSGBM）。
+/// [in]  left/right      已校正的左右灰度图（彩色先转灰度；尺寸须一致否则 -3；
+///                       视差约定 = xL - xR >= 0，右图内容相对左图向左偏移）
+/// [in]  min_disparity   视差起点（可为负，通常 0）
+/// [in]  num_disparities 视差搜索数（> 0 且须为 16 的倍数，否则 -3）
+/// [in]  block_size      匹配块边长（奇数 >= 3；偶数自动补奇、< 3 按 3）；
+///                       P1/P2 平滑惩罚按 OpenCV 推荐 8/32·block² 自动设定
+/// [out] out_disparity   一级指针契约——调用方预分配并初始化的容器（沿用 ToGray
+///                       的容器约定，不新增 Free 函数）：
+///                       width/height 须与左右图一致、channels 须为 1、data 容量
+///                       足够（width*height 字节）；不匹配 -> -3，data 为 NULL -> -1
+///                       定标口径：输出 8U 灰度，像素值 = 整数视差（SGBM 的
+///                       CV_16S 定点值 / 16 四舍五入，钳到 [0,255]）；无效视差
+///                       （SGBM 以 (min_disparity-1)*16 填充）-> 0——按标记值
+///                       显式比对，任意 min_disparity 下无效像素恒为 0；
+///                       返回非 0 时 out_disparity->data 保持调用方内容未写
+/// 返回：0 成功；-1 空指针/空图（含 out_disparity->data 为 NULL）；-3 参数越界
+///       （num_disparities <= 0 或非 16 倍数、两图尺寸不一致、out 容器
+///       尺寸/通道不匹配）；-4 内存不足；-99 OpenCV 异常。
+/// 注：SGBM 搜索窗随视差数向左越出右图边界——左图 x < min_disparity +
+///     num_disparities 的条带内视差不可靠（OpenCV SGBM 特性），可靠视差区
+///     大致从 x >= min_disparity + num_disparities 开始。
+IMAGE2DALG_EXPORT int Image2DAlg_StereoMatch(const Image2DAlg_Image* left,
+                                             const Image2DAlg_Image* right,
+                                             int min_disparity, int num_disparities,
+                                             int block_size,
+                                             Image2DAlg_Image* out_disparity);
+
+/// 2D-3D 位姿估计（已知 3D 物点与 2D 投影 + 相机内参求相机位姿；cv::solvePnP，
+/// 采用默认迭代法 SOLVEPNP_ITERATIVE）。
+/// [in]  object_points  3N 扁平 double [x0,y0,z0,x1,y1,z1,...]（物点，世界系）
+/// [in]  image_points   对应 2D 投影（与 object_points 按序一一对应）
+/// [in]  count          点数（>= 4，否则 -2；3 点欠定）
+/// [in]  camera_matrix  内参 3x3 行主序 [fx,0,cx, 0,fy,cy, 0,0,1]
+/// [in]  dist_coeffs    畸变系数（可为 NULL；dist_count <= 0 视为无畸变）
+/// [in]  dist_count     畸变系数个数（0 = 无畸变；OpenCV 4/5/8/12/14 项模型，
+///                      其余正值 → -3）
+/// [out] rvec/tvec      旋转向量（Rodrigues，可用 calib3d::Rodrigues 转矩阵）
+///                      与平移（世界系 -> 相机系）；返回非 0 时不写入
+/// 返回：0 成功；-1 空指针；-2 点数不足（< 4）或求解失败（退化配置）；
+///       -3 dist_count 非 0/4/5/8/12/14；-99 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_SolvePnP(const double* object_points,  /* 3N */
+                                          const Image2DAlg_Point2f* image_points,
+                                          int count, const double camera_matrix[9],
+                                          const double* dist_coeffs, int dist_count,
+                                          double rvec[3], double tvec[3]);
+
+// ---------------- 滤波扩展（2.3.0 新增） ----------------
+// 注：中值/双边/高斯已由 Image2DAlg_Blur 的 method 0/1/2 覆盖（含 4ch 双边
+// 内部拆 BGR 保 alpha），本节只补 Blur 未覆盖的导数类、自定义核滤波与非局部
+// 均值降噪（NLMeans 块匹配加权去噪，语义不同于局部滤波），避免同一语义
+// 多入口漂移。
+
+/// Laplacian 算子（二阶导：边缘/纹理增强）。
+/// [in]  ksize   核边长（1/3/5/7，奇数；其余 -> -3）
+/// [in]  scale   结果缩放系数（>0；1 = 原始值）
+/// [out] out     同 MedianBlur 容器约定。深度规则：浮点输入 -> 同深度（保留
+///               符号）；8U/16U 输入 -> CV_16S 中间结果取绝对值 × scale 后
+///               饱和回原深度（负响应折叠为正，工业边缘增强常用口径）
+/// 返回：0 成功；-1 空指针；-3 ksize 非法/scale <= 0/容器不匹配；-99 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_Laplacian(const Image2DAlg_Image* in, int ksize,
+                                           double scale, Image2DAlg_Image* out);
+
+/// 自定义卷积核（filter2D：任意线性滤波，锐化/模板匹配核/边缘核）。
+/// [in]  kernel   float 数组，ksize*ksize 个元素行主序（锚点 = 核中心）
+/// [in]  ksize    核边长（奇数，1~51；核元素全 0 也合法——输出全 0 图）
+/// [out] out      同 MedianBlur 容器约定。深度规则：8U/16U 输入 -> CV_16S
+///                中间结果取绝对值后饱和回原深度；浮点输入 -> 同深度（保留符号）
+/// 返回：0 成功；-1 空指针；-3 ksize 非法（<1、>51、偶数）/kernel 为 NULL/
+///       容器不匹配；-99 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_Filter2D(const Image2DAlg_Image* in,
+                                          const float* kernel, int ksize,
+                                          Image2DAlg_Image* out);
+
+/// 非局部均值降噪（NLMeans：cv::fastNlMeansDenoising / fastNlMeansDenoisingColored，
+/// 块匹配加权平均去高斯白噪声，保细节优于局部滤波——与 Blur 双边互补的另一条
+/// 降噪路径，Blur 未覆盖此语义故单设入口）。
+/// [in]  in              输入图（1 灰度 / 3 BGR / 4 BGRA；其余 -> -3）
+/// [in]  h               亮度分量滤波强度（>0；常用 3~10：大 = 去噪强但细节损失
+///                       多，小 = 保细节但有残留噪声；建议默认 3）
+/// [in]  h_color         彩色分量强度（>0；仅 3/4 通道生效——内部转 CIELAB 后
+///                       L 分量用 h、AB 分量用 h_color，通常取 = h）
+/// [in]  template_window 模板窗边长（块尺寸；奇数，偶数/过小自动补奇下限 3，
+///                       默认建议 7）
+/// [in]  search_window   搜索窗边长（取相似块的搜索范围；奇数，偶数自动补奇；
+///                       调用值须 > template_window，补奇后仍保证严格大于；
+///                       默认建议 21，性能随其线性下降）
+/// [out] out             同 MedianBlur 容器约定：malloc 新紧排缓冲（width/height/
+///                       channels 同输入），用 Image2DAlg_FreeImage 释放；返回
+///                       非 0 时 out->data 保持调用方内容未写。路由规则：
+///                       1 通道 -> fastNlMeansDenoising；3 通道 ->
+///                       fastNlMeansDenoisingColored；4 通道 BGRA 内部拆 BGR 走
+///                       Colored 后回贴原 alpha（同 Blur 4ch 双边先例）。
+///                       输入容器恒 8U 紧排（data 为 unsigned char*，全模块统一
+///                       口径；cv photo 模块 NLMeans 支持 CV_8U/CV_16U，32F 不适用）
+/// 返回：0 成功；-1 空指针/空图（in/out 为 NULL、data 为空、宽高 <= 0）；
+///       -3 h <= 0、h_color <= 0、search_window <= template_window 或容器不匹配
+///       （通道非 1/3/4）；-99 OpenCV 异常。
+IMAGE2DALG_EXPORT int Image2DAlg_DenoiseNLMeans(const Image2DAlg_Image* in,
+                                                double h, double h_color,
+                                                int template_window, int search_window,
+                                                Image2DAlg_Image* out);
 
 #ifdef __cplusplus
 }

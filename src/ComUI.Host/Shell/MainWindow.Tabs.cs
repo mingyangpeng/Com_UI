@@ -126,6 +126,19 @@ public partial class MainWindow
         _propsView.SetParams(null);   // 欢迎/动态文档页：清空参数区
     }
 
+    /// <summary>标签图标：欢迎页🖥、动态文档📄，面板取 PanelDescriptor.Icon（与活动栏同源）。
+    /// 按 key 解析而非依赖调用方传参——首次打开/会话恢复/浮动窗重挂全部走 BuildTabItem，一致。</summary>
+    private string ResolveTabIcon(string key)
+    {
+        if (key == "welcome") return "🖥";
+        if (key.StartsWith("doc:")) return "📄";
+        if (_manager is null) return "";
+        foreach (var plugin in _manager.UiPlugins)
+            foreach (var panel in plugin.Panels)
+                if (panel.Id == key) return panel.Icon ?? "";
+        return "";
+    }
+
     private static string TabKey(TabItem t) => t.Tag switch
     {
         PanelTag tag => tag.PanelId,
@@ -142,11 +155,23 @@ public partial class MainWindow
 
     // ==================== 分屏标签区（树驱动） ====================
 
-    /// <summary>构建标签页（标题/✕/右键分屏菜单）。</summary>
+    /// <summary>构建标签页（图标 + 标题/✕/右键分屏菜单）。
+    /// 图标取面板描述符 Icon（与活动栏同源），欢迎页/动态文档给默认图标；
+    /// 按 key 解析，保证首次打开/会话恢复/浮动窗重挂全部路径一致。</summary>
     private TabItem BuildTabItem(string key, string title, Control content)
     {
-        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 6 };
-        header.Children.Add(new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center });
+        const double tabFont = 11;   // 标签头统一字号：图标与文字同大，收紧顶部占用
+        var header = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 4 };
+        var icon = ResolveTabIcon(key);
+        if (!string.IsNullOrEmpty(icon))
+            header.Children.Add(new TextBlock
+            {
+                Text = icon,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = tabFont,
+                TextAlignment = TextAlignment.Center,
+            });
+        header.Children.Add(new TextBlock { Text = title, VerticalAlignment = VerticalAlignment.Center, FontSize = tabFont });
         var close = new Button { Content = "✕", Classes = { "tabclose" } };
         var tab = new TabItem { Tag = new PanelTag(key, title), Header = header, Content = content };   // ★PanelTag：CloseAllTabs/SyncPropsFor/关联联动的类型判据（此前赋 key 字符串导致三处全死）
         _tabTitles[key] = title;

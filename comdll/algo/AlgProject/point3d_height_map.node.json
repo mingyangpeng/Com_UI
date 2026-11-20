@@ -1,0 +1,59 @@
+{
+  "node": {
+    "id": "alg.point3d.height_map",
+    "name": "点云高度图",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "点云栅格化为高度图（3D→2D 显示桥）：XY 栅格取格内 z（mode 0=最高 1=最低 2=平均 3=点计数密度），高度归一化映射为 8U 灰度图（zmin→0、zmax→255，mask=0 空格填 0）输出 BGRA——下游可接 2D 全部图像算子（阈值/连通域/拟合等）做 AOI 检出；栅格参数与有效率并入节点消息；row 0 = y 最小，与 2D 图像坐标系一致"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiHeightMap",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "cell",
+      "label": "栅格边长",
+      "type": "number",
+      "default": 0.1,
+      "min": 0.0001,
+      "max": 1000000,
+      "description": "栅格边长（与点云坐标同单位，>0；总格数上限 2000 万，超出报错）"
+    },
+    {
+      "name": "mode",
+      "label": "栅格取值",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "description": "0=每格最高z 1=每格最低z 2=每格平均z 3=点计数密度（密度图同样归一化显示）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "高度图",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "node": {
+    "id": "alg.image2d.blob_detect",
+    "name": "斑点检测",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "SimpleBlobDetector 斑点检测（圆点/焊盘快速定位：灰度多阈值二值化+连通域形状过滤聚合）：输出圆标注图，圆心/半径并入节点消息；圆度/凸性 <=0 显式关闭对应过滤；精密测量请接 fit_circles（逐轮廓最小二乘拟合）"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiBlobDetect",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "min_area",
+      "label": "面积下限",
+      "type": "number",
+      "default": 100,
+      "min": 0,
+      "max": 10000000,
+      "description": "面积过滤下限（像素²，<=0 = 无下限）"
+    },
+    {
+      "name": "max_area",
+      "label": "面积上限",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 10000000,
+      "description": "面积过滤上限（<=0 = 不设上限）"
+    },
+    {
+      "name": "min_circularity",
+      "label": "最小圆度",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "最小圆度 [0,1]（<=0 显式关闭圆度过滤）"
+    },
+    {
+      "name": "min_convexity",
+      "label": "最小凸性",
+      "type": "number",
+      "default": 0,
+      "min": 0,
+      "max": 1,
+      "description": "最小凸性 [0,1]（<=0 显式关闭凸性过滤；OpenCV 4.4 默认 Params 凸性过滤开启 0.95，会滤掉光栅化圆的锯齿轮廓）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "标注图",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

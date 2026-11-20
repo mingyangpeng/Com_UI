@@ -204,7 +204,9 @@ public static class NodeJsonRegistry
         foreach (var p in json.Params)
             values.Add(ctx.Params.TryGetValue(p.Name, out var v) ? v : ConvertDefault(p.Default, p.Type));
 
-        var (outImages, outClouds) = native.Run(values, images, clouds);
+        var (outImages, outClouds) = native.Run(values, images, clouds, out var opMessage);
+        if (!string.IsNullOrWhiteSpace(opMessage))
+            ctx.Log($"[消息] {opMessage}");   // 成功消息通道（量测统计/配准 fitness 等随行文本，manual_regist 先例）
 
         // 输出分发：image 端口依次消费返回图像，cloud 端口依次消费返回点云
         var dict = new Dictionary<string, object?>();

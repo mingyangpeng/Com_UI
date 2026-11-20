@@ -1,0 +1,197 @@
+{
+  "node": {
+    "id": "alg.point3d.transform_cloud",
+    "name": "点云变换",
+    "group": "3D 点云",
+    "category": "处理",
+    "description": "点云空间变换（PCL，method 0~6 全量）：应用 4x4 矩阵（文本，manual_regist 同款）/平移/绕轴旋转/绕点轴旋转/三轴缩放/绕点缩放/投影到平面；角度单位为弧度（API 口径）；变换前后点数并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiTransformCloud",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "变换方法",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 6,
+      "description": "0=applyMatrix 应用4x4矩阵 1=translate平移 2=rotate绕轴旋转(过原点) 3=rotateAround绕点轴旋转 4=scale三轴缩放 5=scaleAround绕点缩放 6=project投影到平面"
+    },
+    {
+      "name": "transform_matrix",
+      "label": "4x4矩阵(method 0)",
+      "type": "text",
+      "default": "1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1",
+      "description": "method 0：4x4 行主序 16 值逗号分隔（[r00 r01 r02 tx | r10 r11 r12 ty | r20 r21 r22 tz | 0 0 0 1]，manual_regist init_transform 同款）"
+    },
+    {
+      "name": "dx",
+      "label": "平移dx(method 1)",
+      "type": "number",
+      "default": 0,
+      "description": "method 1：X 平移量"
+    },
+    {
+      "name": "dy",
+      "label": "平移dy(method 1)",
+      "type": "number",
+      "default": 0,
+      "description": "method 1：Y 平移量"
+    },
+    {
+      "name": "dz",
+      "label": "平移dz(method 1)",
+      "type": "number",
+      "default": 0,
+      "description": "method 1：Z 平移量"
+    },
+    {
+      "name": "axis_x",
+      "label": "旋转轴X(method 2/3)",
+      "type": "number",
+      "default": 0,
+      "description": "method 2/3：旋转轴 x 分量（过原点/pivot，不需单位化，内部归一；零向量报参数错）"
+    },
+    {
+      "name": "axis_y",
+      "label": "旋转轴Y(method 2/3)",
+      "type": "number",
+      "default": 0,
+      "description": "method 2/3：旋转轴 y 分量"
+    },
+    {
+      "name": "axis_z",
+      "label": "旋转轴Z(method 2/3)",
+      "type": "number",
+      "default": 1,
+      "description": "method 2/3：旋转轴 z 分量（默认绕 Z 轴）"
+    },
+    {
+      "name": "rotate_angle",
+      "label": "旋转角弧度(method 2/3)",
+      "type": "number",
+      "default": 0,
+      "description": "method 2/3：旋转角（弧度，右手系；度×π/180 换算）"
+    },
+    {
+      "name": "pivot_x",
+      "label": "轴过点X(method 3)",
+      "type": "number",
+      "default": 0,
+      "description": "method 3：旋转轴所过点 x（pivot）"
+    },
+    {
+      "name": "pivot_y",
+      "label": "轴过点Y(method 3)",
+      "type": "number",
+      "default": 0,
+      "description": "method 3：旋转轴所过点 y"
+    },
+    {
+      "name": "pivot_z",
+      "label": "轴过点Z(method 3)",
+      "type": "number",
+      "default": 0,
+      "description": "method 3：旋转轴所过点 z"
+    },
+    {
+      "name": "scale_x",
+      "label": "缩放sx(method 4/5)",
+      "type": "number",
+      "default": 1,
+      "description": "method 4/5：X 缩放系数"
+    },
+    {
+      "name": "scale_y",
+      "label": "缩放sy(method 4/5)",
+      "type": "number",
+      "default": 1,
+      "description": "method 4/5：Y 缩放系数"
+    },
+    {
+      "name": "scale_z",
+      "label": "缩放sz(method 4/5)",
+      "type": "number",
+      "default": 1,
+      "description": "method 4/5：Z 缩放系数"
+    },
+    {
+      "name": "center_x",
+      "label": "缩放中心X(method 5)",
+      "type": "number",
+      "default": 0,
+      "description": "method 5：缩放中心 x（p' = c + s·(p - c)）"
+    },
+    {
+      "name": "center_y",
+      "label": "缩放中心Y(method 5)",
+      "type": "number",
+      "default": 0,
+      "description": "method 5：缩放中心 y"
+    },
+    {
+      "name": "center_z",
+      "label": "缩放中心Z(method 5)",
+      "type": "number",
+      "default": 0,
+      "description": "method 5：缩放中心 z"
+    },
+    {
+      "name": "plane_a",
+      "label": "平面a(method 6)",
+      "type": "number",
+      "default": 0,
+      "description": "method 6：投影平面 ax+by+cz+d=0 的 a（法向 (a,b,c) 零向量报参数错）"
+    },
+    {
+      "name": "plane_b",
+      "label": "平面b(method 6)",
+      "type": "number",
+      "default": 0,
+      "description": "method 6：平面方程系数 b"
+    },
+    {
+      "name": "plane_c",
+      "label": "平面c(method 6)",
+      "type": "number",
+      "default": 1,
+      "description": "method 6：平面方程系数 c（默认投影到 z=0 平面）"
+    },
+    {
+      "name": "plane_d",
+      "label": "平面d(method 6)",
+      "type": "number",
+      "default": 0,
+      "description": "method 6：平面方程常数 d"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/Point3DAlg_CloudOps.cpp",
+      "src/ShapelyAlg/CloudProcessor.h",
+      "src/ShapelyAlg/CloudProcessor.cpp"
+    ],
+    "includes": [
+      "src",
+      "src/ShapelyAlg"
+    ]
+  }
+}

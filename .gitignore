@@ -15,3 +15,7 @@ output/
 .vs/
 .idea/
 *.user
+
+# 第三方运行时依赖 DLL（体积大/调试版，本地依赖，不进仓库）
+comdll/algo/AlgProject/opencv_world*.dll
+comdll/algo/AlgProject/OpenNI2.jni.dll

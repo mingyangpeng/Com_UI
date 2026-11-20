@@ -1,0 +1,62 @@
+{
+  "node": {
+    "id": "alg.image2d.fast_features",
+    "name": "FAST 角点",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "FAST 角点检测（比 Harris 快一个数量级，实时/视频前处理）：输出角点十字标注图与点集点云(z=0)，坐标并入节点消息；无检出(平坦图)属正常"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiFastFeatures",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "threshold",
+      "label": "灰度差阈值",
+      "type": "int",
+      "default": 20,
+      "min": 1,
+      "max": 255,
+      "description": "圆周连续像素比较的灰度差阈值（典型 10~40，越大角点越少越稳）"
+    },
+    {
+      "name": "nonmax",
+      "label": "非极大值抑制",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 1,
+      "description": "1=开启 3x3 非极大值抑制去重"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "标注图",
+      "type": "image"
+    },
+    {
+      "name": "点集",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

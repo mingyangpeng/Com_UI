@@ -167,6 +167,11 @@ public:
                                          double y_min, double y_max,
                                          double z_min, double z_max);
 
+    /// 近似体素降采样（PCL ApproximateVoxelGrid）：哈希近似质心，大点云比
+    /// filterVoxelGrid 快数倍；格点质心略有偏差，输出格数与精确版可能相差 1~2%。
+    /// [in]  leaf  体素边长（>0；<=0 或空云 → nullptr，调用方按空结果处理）
+    static CloudPtr filterApproxVoxelGrid(const CloudConstPtr& src, double leaf);
+
     // ---------------- extract：点云提取 ----------------
 
     /// 按索引提取子点云（常用于提取拟合/分割后的局内点）。
@@ -327,6 +332,13 @@ public:
                           std::vector<float>& out_center, double& out_radius,
                           std::vector<int>& out_inliers);
 
+    /// 拟合空间直线（PCL SACMODEL_LINE：RANSAC/LMEDS/MSAC 三种方法均支持）。
+    /// [out] out_point  直线上一点 [x,y,z]
+    /// [out] out_dir    单位方向 [dx,dy,dz]
+    static bool fitLine3D(const CloudConstPtr& src, FitMethod method, double distance_threshold,
+                          std::vector<float>& out_point, std::vector<float>& out_dir,
+                          std::vector<int>& out_inliers);
+
     /// 拟合圆柱。
     /// [out] out_axis   轴方向 [dx,dy,dz]（单位向量）
     /// [out] out_point  轴上一点 [x,y,z]
@@ -424,7 +436,10 @@ public:
     /// 噪声点单独标记。
     /// [in] eps         邻域半径
     /// [in] min_points  核心点所需最小邻居数（含自身）
-    /// [out] out_labels 与 src 等长的簇标签；-1 = 噪声，≥0 = 簇号（按簇大小降序编号）
+    /// [out] out_labels 按"剔除非有限点后的 clean 云"对齐的簇标签（**与 src 不等长**：
+    ///             labels[j] = clean 点 j 的标签，clean 点 j 对应 src 行 global[j]，
+    ///             global 由 fitInputClean 产生；含 NaN/Inf 输入时调用方须自行映射回原行号）；
+    ///             -1 = 噪声，≥0 = 簇号（按簇大小降序编号）
     /// 返回：簇数量（不含噪声）
     /// 注意：PCL 1.9 无 DBSCAN，内部用 KdTree 半径搜索 + 并查集实现。
     static int segmentDBSCAN(const CloudConstPtr& src, double eps, int min_points,
@@ -464,9 +479,11 @@ public:
     /// 返回：false = 未收敛。失败时 out_transform 内容未定义。
     /// [in] init_transform  初始变换（可为 nullptr = 单位阵）。
     ///       配准是局部优化，初值越接近真值越可靠——手工粗调后精配准必须传它。
+    /// [in] max_iteration  最大迭代数（0 = PCL 默认 60；多尺度金字塔按层级传）
     static bool registICP_PointToPoint(const CloudConstPtr& source, const CloudConstPtr& target,
                                        double max_dist, float out_transform[16],
-                                       const float* init_transform = nullptr);
+                                       const float* init_transform = nullptr,
+                                       int max_iteration = 0);
 
     /// ICP 点到面配准（收敛更快更稳，需要 target 法线）。
     /// [in] target_normals  target 的法线（与 target 点一一对应，数量必须一致）
@@ -522,6 +539,25 @@ public:
     static bool registInformationMatrix(const CloudConstPtr& source, const CloudConstPtr& target,
                                         const float transform[16], double max_dist,
                                         double out_information[36]);
+
+    /// 多尺度 ICP（Open3D multiscale_icp）：voxel 金字塔由粗到细逐级点到点 ICP，
+    /// 每级在 filterVoxelGrid 下采样云上进行，上一级变换作下一级初值（PCL align(init)
+    /// 的 final 已含 init，直接链式传递）；每级对应距离 = max_dist_factor × 该级 voxel
+    /// ——粗级容差大锁全局位置，细级容差小做精修。
+    /// 适用：大点云 / 初值偏差大于末级对应距离的场景（如 moi_wafer 48 万点，
+    /// 典型 voxel {2.5, 1.0, 0.3}、iters {80, 60, 60}、factor 2.0）。
+    /// voxel_sizes 为空时退化为原始云上的单级 ICP（对应距离 = max_dist_factor，
+    /// 此时 factor 是距离本身而非系数；<=0 无法确定距离，返回 false）。
+    /// [in] voxel_sizes  各级体素边长（粗→细，同点云单位；每级从原始点云独立下采样）
+    /// [in] iters        各级最大迭代数（与 voxel_sizes 对应；数量不足补最后一值；0 = PCL 默认）
+    /// [in] max_dist_factor  每级对应距离 = factor × voxel（<=0 时取 1.5）
+    /// [in] init_transform   初始变换（可为 nullptr = 单位阵）
+    /// 返回：false = 输入无效或某级未收敛。失败时 out_transform 内容未定义。
+    static bool registMultiscaleICP(const CloudConstPtr& source, const CloudConstPtr& target,
+                                    const std::vector<double>& voxel_sizes,
+                                    const std::vector<int>& iters,
+                                    double max_dist_factor, float out_transform[16],
+                                    const float* init_transform = nullptr);
 
     // ---------------- tree：空间索引与近邻搜索 ----------------
 

@@ -1,0 +1,1 @@
+F1 冒烟真机执行待回填（锁屏 SendKeys 失效，真机跑 tools/cloud3d_hotkey_smoke.ps1 后把 PASS/FAIL 清单粘贴到 smoke_final.txt）

@@ -25,6 +25,9 @@ public partial class MainWindow : Window
 {
     public static MainWindow? Instance { get; private set; }
 
+    // 属性面板固定宽度（色板等控件按此宽度布局，不随拖拽变化）
+    private const double PropsPanelWidth = 255;
+
     private readonly LogService _log = new();
     private readonly DataBus _bus = new();
 
@@ -52,15 +55,12 @@ public partial class MainWindow : Window
     private ActivityEntry? _activeSidebar;     // 当前侧边栏视图（null = 收起）
     private bool _propsCollapsed;
     private bool _logCollapsed;
-    private CancellationTokenSource? _runCts;
     private bool _autoOpen = true;
 
     private readonly Dictionary<string, string> _tabTitles = new();        // 全部标签 key → 标题（Tabs/Floating/Session 共用）
 
     private TextBlock _statusText = null!;
-    private TextBlock _busyText = null!;
     private TextBlock _pluginCountText = null!;
-    private Button _cancelRunBtn = null!;
 
     public MainWindow()
     {
@@ -84,9 +84,7 @@ public partial class MainWindow : Window
         _logHost = this.FindControl<ContentControl>("LogHost")!;
         _propsHost = this.FindControl<ContentControl>("PropsHost")!;
         _statusText = this.FindControl<TextBlock>("StatusText")!;
-        _busyText = this.FindControl<TextBlock>("BusyText")!;
         _pluginCountText = this.FindControl<TextBlock>("PluginCountText")!;
-        _cancelRunBtn = this.FindControl<Button>("CancelRunBtn")!;
 
         _logHost.Content = _logView;
         _propsHost.Content = _propsView;
@@ -100,7 +98,7 @@ public partial class MainWindow : Window
         RestoreWindowGeometry();   // 会话窗口几何（分屏/页面在 Start 里恢复——需等插件加载）
 
         _pluginList = new PluginListSidebar((_, panel) => ShowPanel(panel));
-        _algoList = new AlgoSidebar((algo, cmd) => _ = RunCommandAsync(algo, cmd), _bus);
+        _algoList = new AlgoSidebar(_bus);
         _algoList.LogMessage = m => _log.Info(m);   // 侧边栏文件操作（复制/粘贴）日志
 
         _propsView.CollapseRequested += () => SetPropsCollapsed(true);
@@ -320,7 +318,7 @@ public partial class MainWindow : Window
     {
         _propsCollapsed = collapsed;
         var cols = MainGrid.ColumnDefinitions;
-        cols[5].Width = new GridLength(collapsed ? 0 : 255);
+        cols[5].Width = new GridLength(collapsed ? 0 : PropsPanelWidth);
         PropsHost.IsVisible = !collapsed;
         PropsSplitter.IsVisible = !collapsed;
         UpdateActivityHighlight();
@@ -415,58 +413,12 @@ public partial class MainWindow : Window
             : null);
     }
 
-    private async Task RunCommandAsync(AlgoRecord algo, AlgoCommand cmd)
-    {
-        if (_runCts is not null)
-        {
-            SetStatus("已有算法在运行，请等待或取消。");
-            return;
-        }
-
-        var values = new Dictionary<string, object?>();
-        if (cmd.Params is { Count: > 0 })
-        {
-            var confirmed = await Views.ParamDialog.ShowAsync(this, cmd.Title, algo.Description, cmd.Params, values, m => _log.Error(m));
-            if (!confirmed) return;
-        }
-
-        var ctx = new HostAlgoRunContext(cmd.Title, values, _log, s => SetStatus(s));
-        _runCts = ctx.CancelSource;
-        _busyText.Text = $"▶ {cmd.Title} 运行中…";
-        _busyText.IsVisible = true;
-        _cancelRunBtn.IsVisible = true;
-        _log.Info($"开始执行: {cmd.Title}");
-
-        try
-        {
-            await Task.Run(() => cmd.Execute(ctx), ctx.Cancel);
-            _log.Info($"执行完成: {cmd.Title}");
-            SetStatus($"{cmd.Title} 完成");
-        }
-        catch (OperationCanceledException)
-        {
-            _log.Warn($"已取消: {cmd.Title}");
-            SetStatus($"{cmd.Title} 已取消");
-        }
-        catch (Exception ex)
-        {
-            _log.Error($"执行失败 {cmd.Title}: {ex}");
-            SetStatus($"{cmd.Title} 失败");
-        }
-        finally
-        {
-            _runCts = null;
-            _busyText.IsVisible = false;
-            _cancelRunBtn.IsVisible = false;
-        }
-    }
-
     // ==================== 刷新 ====================
 
     private void RefreshSidebars()
     {
         _pluginList.Refresh(_manager.UiPlugins);
-        _algoList.Refresh(_manager.AlgoPlugins);
+        _algoList.Refresh();
     }
 
     private void RefreshCount()
@@ -565,9 +517,6 @@ public partial class MainWindow : Window
             _log.Error($"打开插件目录失败: {ex.Message}");
         }
     }
-
-    private void CancelRun_Click(object? sender, RoutedEventArgs e)
-        => _runCts?.Cancel();
 
     private void Exit_Click(object? sender, RoutedEventArgs e) => Close();
 

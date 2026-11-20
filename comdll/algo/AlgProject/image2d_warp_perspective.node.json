@@ -1,0 +1,74 @@
+{
+  "node": {
+    "id": "alg.image2d.warp_perspective",
+    "name": "透视变换",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "透视变换 dst(x,y)=齐次投影 src(M·[x,y,1]ᵀ)：矩阵可取 estimate_transform(motion=1) 消息里的 h=[...]（9 值抄入 text 参数），输出画布默认同输入"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiWarpPerspective",
+  "inputs": [
+    {
+      "name": "输入",
+      "type": "image"
+    }
+  ],
+  "params": [
+    {
+      "name": "m",
+      "label": "透视矩阵(9值)",
+      "type": "text",
+      "default": "1,0,0,0,1,0,0,0,1",
+      "description": "3x3 行主序 9 值逗号分隔（h[8] 归一为 1）；错误码 3=非 9 个数值"
+    },
+    {
+      "name": "out_width",
+      "label": "输出宽(0同输入)",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 10000,
+      "description": "输出画布宽（<=0 = 同输入宽）"
+    },
+    {
+      "name": "out_height",
+      "label": "输出高(0同输入)",
+      "type": "int",
+      "default": 0,
+      "min": 0,
+      "max": 10000,
+      "description": "输出画布高（<=0 = 同输入高）"
+    },
+    {
+      "name": "interpolation",
+      "label": "插值方式",
+      "type": "int",
+      "default": 1,
+      "min": 0,
+      "max": 4,
+      "description": "0 近邻 / 1 线性 / 2 立方 / 3 面积 / 4 Lanczos4"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "输出",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

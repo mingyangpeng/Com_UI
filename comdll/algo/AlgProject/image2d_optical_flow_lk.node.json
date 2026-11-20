@@ -1,0 +1,66 @@
+{
+  "node": {
+    "id": "alg.image2d.optical_flow_lk",
+    "name": "LK 光流跟踪",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "金字塔 LK 光流跟踪（视频/序列帧间点跟踪）：前帧+后帧+初始点 → 跟踪后点云（仅保留跟踪成功的点，z=0），tracked/lost 计数与点坐标并入节点消息；初始点可来自 fast_features/harris_corners 的点集输出"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiOpticalFlowLk",
+  "inputs": [
+    {
+      "name": "前帧",
+      "type": "image"
+    },
+    {
+      "name": "后帧",
+      "type": "image"
+    },
+    {
+      "name": "初始点",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "win_size",
+      "label": "搜索窗边长",
+      "type": "int",
+      "default": 21,
+      "min": 5,
+      "max": 101,
+      "description": "LK 搜索窗边长（典型 21；偶数由核心层自动 +1）"
+    },
+    {
+      "name": "max_level",
+      "label": "金字塔层数",
+      "type": "int",
+      "default": 3,
+      "min": 0,
+      "max": 10,
+      "description": "金字塔层数（典型 3；越大越能处理大位移，越慢）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "跟踪点",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

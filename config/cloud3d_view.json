@@ -1,0 +1,11 @@
+{
+  "Stride": 1,
+  "FarClip": 0.0,
+  "ClipAxis": 1,
+  "ClipLo": null,
+  "ClipHi": null,
+  "ColorMin": null,
+  "ColorMax": null,
+  "Projection": 0,
+  "LockPitch": false
+}

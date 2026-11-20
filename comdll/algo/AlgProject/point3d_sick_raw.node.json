@@ -1,0 +1,70 @@
+{
+  "node": {
+    "id": "alg.point3d.sick_raw",
+    "name": "SICK 原始高度图",
+    "group": "IO",
+    "category": "源",
+    "description": "读取 SICK 原始高度图（相机 0，uint16 原始高度值）：有效格按 raw 最小/最大归一化为 8U 灰度 BGRA（vmin→0、vmax→255；0=无效格填黑，不参与归一化），原始尺寸 w×h、行数、编码器行数、有效率与 raw 范围并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Point3DAlg.dll",
+  "method": "Point3DAlg_ComuiSickRaw",
+  "inputs": [],
+  "params": [
+    {
+      "name": "folder",
+      "label": "扫描数据文件夹",
+      "type": "path",
+      "default": "",
+      "description": "扫描数据文件夹；多相机用 ';' 分隔（顺序=相机序）"
+    },
+    {
+      "name": "frame",
+      "label": "指定帧(-1=全部)",
+      "type": "int",
+      "default": -1,
+      "min": -1,
+      "description": "指定帧号（>=0 只读每个相机第 frame 帧，按文件名顺序从 0 计；<0 = 全部帧）"
+    },
+    {
+      "name": "recipe_path",
+      "label": "配方json(可空)",
+      "type": "path",
+      "default": "",
+      "description": "用户配方 json 路径（空 = 默认 Z:\\Calibrate\\3D\\MtxJuxin60003D.dll.user.json）"
+    },
+    {
+      "name": "common_path",
+      "label": "通用参数json(可空)",
+      "type": "path",
+      "default": "",
+      "description": "通用参数 json 路径（空 = 默认 Z:\\Juxin60003D_CommonParams.json）"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "原始高度图",
+      "type": "image"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Point3DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Point3DAlg/include/Point3DAlg_api.h",
+      "src/Point3DAlg/include/Point3DAlg_SickApi.h",
+      "src/Point3DAlg/include/Point3DAlg_SickReader.h",
+      "src/Point3DAlg/Point3DAlg_SickIO.cpp",
+      "src/Point3DAlg/Point3DAlg_SickReader.cpp",
+      "src/CommonAlg/include/CommonAlg_Json.h",
+      "thrid/nlohmann_json/single_include/nlohmann/json.hpp"
+    ],
+    "includes": [
+      "src",
+      "src/Point3DAlg/include",
+      "src/CommonAlg/include",
+      "thrid/nlohmann_json/single_include"
+    ]
+  }
+}

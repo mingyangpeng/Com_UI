@@ -1,0 +1,43 @@
+{
+  "Name": "t1",
+  "Locked": false,
+  "IsOperator": false,
+  "OperatorGroup": "",
+  "Nodes": [
+    {
+      "Id": "8fc3e85b",
+      "Def": "source.cube",
+      "Title": null,
+      "X": -599.3881872669322,
+      "Y": -174.5928738942252,
+      "Width": 204,
+      "Scope": null,
+      "Params": {
+        "size": 2,
+        "step": 0.02
+      }
+    },
+    {
+      "Id": "d59218b7",
+      "Def": "draw.3d",
+      "Title": null,
+      "X": 8,
+      "Y": 8,
+      "Width": 250,
+      "Scope": null,
+      "Params": {}
+    }
+  ],
+  "Connections": [
+    {
+      "From": "8fc3e85b",
+      "FromPort": "\u70B9\u4E91",
+      "To": "d59218b7",
+      "ToPort": "\u8F93\u5165",
+      "Feedback": false,
+      "Bend": 0,
+      "Bend2": 0,
+      "Anchors": null
+    }
+  ]
+}

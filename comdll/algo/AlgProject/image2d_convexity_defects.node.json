@@ -1,0 +1,39 @@
+{
+  "node": {
+    "id": "alg.image2d.convexity_defects",
+    "name": "凸性缺陷",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "凸包与轮廓间凹陷检测（引脚变形/缺料）：输入轮廓点集（如 contour_cloud 输出），输出各缺陷最深点 z=0 点云，深度/顶点索引并入节点消息"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiConvexityDefects",
+  "inputs": [
+    {
+      "name": "轮廓点集",
+      "type": "cloud"
+    }
+  ],
+  "params": [],
+  "outputs": [
+    {
+      "name": "缺陷点",
+      "type": "cloud"
+    }
+  ],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

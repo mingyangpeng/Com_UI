@@ -1,0 +1,48 @@
+{
+  "node": {
+    "id": "alg.image2d.match_shapes",
+    "name": "形状相似度",
+    "group": "2D 图像",
+    "category": "处理",
+    "description": "Hu 矩形状匹配：两组轮廓点集的相似度（Hu 距离越小越相似，0=完全一致），结果并入节点消息，无端口输出"
+  },
+  "runtime": "native",
+  "assembly": "Image2DAlg.dll",
+  "method": "Image2DAlg_ComuiMatchShapes",
+  "inputs": [
+    {
+      "name": "轮廓 A",
+      "type": "cloud"
+    },
+    {
+      "name": "轮廓 B",
+      "type": "cloud"
+    }
+  ],
+  "params": [
+    {
+      "name": "method",
+      "label": "匹配方法",
+      "type": "int",
+      "default": 1,
+      "min": 1,
+      "max": 3,
+      "description": "1/2/3 = cv::CONTOURS_MATCH_I1~I3（常用 1）"
+    }
+  ],
+  "outputs": [],
+  "source": {
+    "files": [
+      "integration/comui/Image2DAlg_comui.cpp",
+      "integration/comui/comui_native_abi.h",
+      "src/AlgExport.h",
+      "src/Image2DAlg/Image2DAlg_api.cpp",
+      "src/Image2DAlg/Image2DAlg_Ops.cpp",
+      "src/Image2DAlg/include/Image2DAlg_api.h"
+    ],
+    "includes": [
+      "src",
+      "src/Image2DAlg/include"
+    ]
+  }
+}

@@ -149,11 +149,13 @@ public sealed class NativeAlgoInvoker : IDisposable
     }
 
     /// <summary>执行一次调用。参数按 JSON 声明顺序（CLR 类型映射：double/float→double、int/long→int32、
-    /// string→UTF-8 文本、bool→bool）；输入/输出为图像与点云载荷。失败抛带 DLL 错误消息的异常。</summary>
+    /// string→UTF-8 文本、bool→bool）；输入/输出为图像与点云载荷。失败抛带 DLL 错误消息的异常。
+    /// 成功时 message = DLL error 通道文本（统计/结果消息惯例，manual_regist 先例；无则 null）。</summary>
     public (List<ImagePayload> Images, List<CloudPayload> Clouds) Run(
         IReadOnlyList<object?>? parameters,
         IReadOnlyList<ImagePayload>? inputImages,
-        IReadOnlyList<CloudPayload>? inputClouds)
+        IReadOnlyList<CloudPayload>? inputClouds,
+        out string? message)
     {
         var pins = new List<GCHandle>();
         var allocs = new List<IntPtr>();   // 宿主侧 HGlobal（调用后统一释放）
@@ -172,6 +174,7 @@ public sealed class NativeAlgoInvoker : IDisposable
                 FreeDllBuffers(ref output);   // 失败路径也按约定释放（DLL 可能已部分分配）
                 throw new Exception($"原生算子 {_entry} 失败（返回码 {rc}）: {err ?? "（DLL 未提供错误消息）"}");
             }
+            message = output.Error != IntPtr.Zero ? Marshal.PtrToStringUTF8(output.Error) : null;   // 成功消息（静态存储，只读）
             (List<ImagePayload> Images, List<CloudPayload> Clouds) result;
             try
             {
@@ -191,6 +194,13 @@ public sealed class NativeAlgoInvoker : IDisposable
             foreach (var a in allocs) Marshal.FreeHGlobal(a);
         }
     }
+
+    /// <summary>兼容旧签名（不关心成功消息通道的调用方）。</summary>
+    public (List<ImagePayload> Images, List<CloudPayload> Clouds) Run(
+        IReadOnlyList<object?>? parameters,
+        IReadOnlyList<ImagePayload>? inputImages,
+        IReadOnlyList<CloudPayload>? inputClouds)
+        => Run(parameters, inputImages, inputClouds, out _);
 
     // ==================== marshal：托管 → C ====================
 

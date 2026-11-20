@@ -37,6 +37,9 @@ public static class BusTopics
     /// <summary>打开算法（侧边栏单击 → 流水线插件开新页或跳转已打开页）。载荷：string（文件路径）。</summary>
     public const string PipelineOpen = "pipeline/open";
 
+    /// <summary>请求新建一个空白流水线页面（侧边栏 ➕ → 流水线插件 NewPage）。载荷：无。</summary>
+    public const string PipelineNew = "pipeline/new";
+
     /// <summary>算法文件已保存/列表变化（流水线、侧边栏改名 → 侧边栏刷新）。载荷：string（文件路径）。</summary>
     public const string AlgoSaved = "algo/saved";
 
