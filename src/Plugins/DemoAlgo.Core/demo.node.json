@@ -23,7 +23,7 @@
 
   // 用户参数：与 algo.json 相同
   "params": [
-    { "name": "gamma", "label": "Gamma", "type": "number", "default": 1.5, "min": 0.2, "max": 3 }
+    { "name": "gamma", "label": "Gamma", "type": "number", "default": 1.5, "min": 0.2, "max": 3, "description": "Gamma 系数：>1 提亮、<1 压暗、=1 原图" }
   ],
 
   // 输出端口：单输出可省略 from（直接用方法返回值）；多输出用 from 指定返回值属性路径

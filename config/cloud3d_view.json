@@ -1,6 +1,6 @@
 {
   "Stride": 1,
-  "FarClip": 0.0,
+  "FarClip": 0,
   "ClipAxis": 1,
   "ClipLo": null,
   "ClipHi": null,

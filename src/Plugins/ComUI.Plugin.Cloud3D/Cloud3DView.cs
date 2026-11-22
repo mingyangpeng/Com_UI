@@ -403,7 +403,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         {
             try
             {
-                var repo = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
+                // BaseDirectory=src/ComUI.Host/bin/Debug/net8.0 → 上 5 级=仓库根（3 级只到 src/ComUI.Host——曾致配置写入错目录）
+                var repo = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
                 _orderPath = System.IO.Path.Combine(repo, "config", "tool_groups.json");
                 LoadToolOrder();
             }
@@ -415,7 +416,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         {
             try
             {
-                var repo = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", ".."));
+                // BaseDirectory=src/ComUI.Host/bin/Debug/net8.0 → 上 5 级=仓库根（3 级只到 src/ComUI.Host——曾致配置写入错目录）
+                var repo = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
                 _settingsPath = System.IO.Path.Combine(repo, "config", "cloud3d_view.json");
                 var vs = CloudViewSettings.Load(_settingsPath);
                 _stride = vs.Stride;
