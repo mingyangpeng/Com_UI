@@ -100,5 +100,5 @@
 | SendKeys 锁屏失效 | 键位冒烟脚本（tools/cloud3d_hotkey_smoke.ps1）需真机执行回填 PASS/FAIL |
 | GLSL ASCII 强制 | shader 源常量 CheckAscii（英文注释），中文注释会导致构建失败 |
 | heredoc 禁用 | 追加 C#/PS 含 `\n` 字面量内容一律 Write 工具整文件重写（heredoc 转义破坏[CS1010 实测]） |
-| alg 同步覆盖 demo.node.json | alg 会话目录同步会覆盖 DemoStitching（本地资产）——同步后需核对参数说明 |
+| alg 同步覆盖 demo.node.json | alg 会话目录同步会覆盖 DemoStitching（本地资产）——已 4 次冲掉 gamma 说明。根治：`python tools/check_node_json.py` 守卫（R1/R2 说明全非空、R3 gamma 哨兵、R4 双份一致；exit 0/1）。**alg 会话触碰 node.json 后必跑**；日常回归在 `dotnet test` 后追加 |
 | PrintWindow 截图 | tools/shot_window.ps1（锁屏可用，UIA 断言配合=视觉验收链） |

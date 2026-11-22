@@ -112,7 +112,9 @@ public sealed class GlCloudRenderer : IDisposable
             // 无 GL 环境走软件回退；记录真实异常，便于诊断"无 GL 上下文"（如上下文数量耗尽）
             try
             {
-                var log = System.IO.Path.Combine(AppContext.BaseDirectory, "gl_init_error.log");
+                // GL 初始化失败日志：仓库根 output/（原 next-to-exe 重建即丢——Sdk.AppPaths 统一）
+                System.IO.Directory.CreateDirectory(ComUI.Sdk.AppPaths.OutputDir);
+                var log = System.IO.Path.Combine(ComUI.Sdk.AppPaths.OutputDir, "gl_init_error.log");
                 System.IO.File.AppendAllText(log,
                     $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] GlCloudRenderer ctor failed (allowBg={allowBackgroundWorker}): {ex}\n");
             }

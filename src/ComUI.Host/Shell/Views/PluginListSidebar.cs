@@ -20,7 +20,7 @@ namespace ComUI.Host.Views;
 /// </summary>
 public sealed class PluginListSidebar : UserControl
 {
-    private static string OrderPath => Path.Combine(AppPaths.ConfigDir, "panel_order.json");
+    private static string OrderPath => Path.Combine(ComUI.Sdk.AppPaths.ConfigDir, "panel_order.json");
 
     private sealed record RowEntry(string PluginId, Border Row, UiPluginRecord Plugin, PanelDescriptor Panel);
 

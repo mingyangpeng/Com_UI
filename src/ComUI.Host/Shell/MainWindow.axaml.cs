@@ -177,10 +177,10 @@ public partial class MainWindow : Window
     /// <summary>读取 config/host.json：插件目录 / 自动打开面板 / 官方插件（不可卸载）清单。</summary>
     private void ApplyHostConfig()
     {
-        var cfg = HostConfig.Load(AppPaths.ConfigDir, m => _log.Warn(m));
-        AppPaths.ComDllRoot = Path.IsPathRooted(cfg.PluginDirectory)
+        var cfg = HostConfig.Load(ComUI.Sdk.AppPaths.ConfigDir, m => _log.Warn(m));
+        ComUI.Sdk.AppPaths.ComDllRoot = Path.IsPathRooted(cfg.PluginDirectory)
             ? cfg.PluginDirectory
-            : Path.Combine(AppPaths.RepoRoot, cfg.PluginDirectory);
+            : Path.Combine(ComUI.Sdk.AppPaths.RepoRoot, cfg.PluginDirectory);
         _autoOpen = cfg.AutoOpenPlugins;
         _manager.RequiredPlugins = cfg.RequiredPlugins;
     }
@@ -212,7 +212,7 @@ public partial class MainWindow : Window
             ("宿主版本", App.HostVersion),
             (".NET", Environment.Version.ToString()),
             ("操作系统", Environment.OSVersion.VersionString),
-            ("插件目录", AppPaths.ComDllRoot),
+            ("插件目录", ComUI.Sdk.AppPaths.ComDllRoot),
         });
     }
 
@@ -506,11 +506,11 @@ public partial class MainWindow : Window
     {
         try
         {
-            Directory.CreateDirectory(AppPaths.ComDllRoot);
+            Directory.CreateDirectory(ComUI.Sdk.AppPaths.ComDllRoot);
             if (OperatingSystem.IsWindows())
-                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{AppPaths.ComDllRoot}\""));
+                Process.Start(new ProcessStartInfo("explorer.exe", $"\"{ComUI.Sdk.AppPaths.ComDllRoot}\""));
             else if (OperatingSystem.IsLinux())
-                Process.Start(new ProcessStartInfo("xdg-open", AppPaths.ComDllRoot) { UseShellExecute = true });
+                Process.Start(new ProcessStartInfo("xdg-open", ComUI.Sdk.AppPaths.ComDllRoot) { UseShellExecute = true });
         }
         catch (Exception ex)
         {
@@ -527,7 +527,7 @@ public partial class MainWindow : Window
             Text = $"ComUI 显示平台 v{App.HostVersion}\n\n" +
                    $"运行时: .NET {Environment.Version}\n" +
                    $"操作系统: {Environment.OSVersion.VersionString}\n" +
-                   $"插件根目录: {AppPaths.ComDllRoot}\n\n" +
+                   $"插件根目录: {ComUI.Sdk.AppPaths.ComDllRoot}\n\n" +
                    "UI 插件: comdll/ui/<插件>/ （实现 IPlugin，多面板注册）\n" +
                    "算法插件: comdll/algo/<插件>/ （算法 DLL + *.algo.json）\n" +
                    "共享契约: comdll/common/\n\n" +

@@ -77,6 +77,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
     private readonly TextBlock _cloudInfo = new() { FontSize = 12, Foreground = Dim, TextWrapping = TextWrapping.Wrap, FontFamily = new Avalonia.Media.FontFamily("Cascadia Mono, Consolas, monospace") };
     private readonly TextBlock _pickInfo = new() { FontSize = 12, Foreground = Dim, TextWrapping = TextWrapping.Wrap, Text = "无（Ctrl+左键单击拾取）", FontFamily = new Avalonia.Media.FontFamily("Cascadia Mono, Consolas, monospace") };
     private readonly TextBlock _selInfo = new() { FontSize = 12, Foreground = Dim, TextWrapping = TextWrapping.Wrap, Text = "无（Ctrl+左键拖拽框选）", FontFamily = new Avalonia.Media.FontFamily("Cascadia Mono, Consolas, monospace") };
+    /// <summary>「实体统计」分段文本（工作实体 count/loaded/selCount/包围盒），事件驱动刷新（UpdateStatsText）。</summary>
+    private readonly TextBlock _statsInfo = new() { FontSize = 12, Foreground = Dim, TextWrapping = TextWrapping.Wrap, Text = "未选中点云实体", FontFamily = new Avalonia.Media.FontFamily("Cascadia Mono, Consolas, monospace") };
     private readonly StackPanel _paramsContent;
     private Vector3 _defaultSingle = new(0.7f, 0.75f, 0.8f);   // 新点云单色默认（历史约定色）
 
@@ -397,18 +399,20 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         // 数据源下拉的初始化移到属性面板构建处（数据源已迁入右侧属性面板）
         _paramsContent = BuildParams(resetBtn, clearBtn, clearRangeBtn, clearClipBtn, !_embed && ctx is not null);
 
+        // 「实体统计」事件驱动刷新：实体增删/上传完成/变换/提取剔除（CloudsChanged）触发重算（禁每帧重算）
+        CloudsChanged += UpdateStatsText;
+
         // 工具栏（Apple：无填充、底边 hairline 分隔、图标统一底座）
         // 工具条分组持久化路径（仓库根/config/tool_groups.json）
         if (ctx is not null)
         {
             try
             {
-                // BaseDirectory=src/ComUI.Host/bin/Debug/net8.0 → 上 5 级=仓库根（3 级只到 src/ComUI.Host——曾致配置写入错目录）
-                var repo = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-                _orderPath = System.IO.Path.Combine(repo, "config", "tool_groups.json");
+                // 仓库根 config/（曾手工 BaseDirectory 上推 5 级，3 级时写错目录——现走 Sdk.AppPaths 结构性根治）
+                _orderPath = System.IO.Path.Combine(ComUI.Sdk.AppPaths.ConfigDir, "tool_groups.json");
                 LoadToolOrder();
             }
-            catch { }
+            catch (Exception ex) { _ctx?.SetStatus($"工具条分组配置加载失败：{ex.Message}"); }
         }
 
         // 视图设置持久化路径 + 加载（抽稀/截断/切片/色带域/投影/锁定轴）
@@ -416,9 +420,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         {
             try
             {
-                // BaseDirectory=src/ComUI.Host/bin/Debug/net8.0 → 上 5 级=仓库根（3 级只到 src/ComUI.Host——曾致配置写入错目录）
-                var repo = System.IO.Path.GetFullPath(System.IO.Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
-                _settingsPath = System.IO.Path.Combine(repo, "config", "cloud3d_view.json");
+                // 仓库根 config/（同 tool_groups.json：走 Sdk.AppPaths 结构性根治手工上推）
+                _settingsPath = System.IO.Path.Combine(ComUI.Sdk.AppPaths.ConfigDir, "cloud3d_view.json");
                 var vs = CloudViewSettings.Load(_settingsPath);
                 _stride = vs.Stride;
                 _farClip = (float)vs.FarClip;
@@ -439,7 +442,7 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
                 _lockPitch = vs.LockPitch;
                 _projCombo.SelectedIndex = vs.Projection;
             }
-            catch { }
+            catch (Exception ex) { _ctx?.SetStatus($"视图设置加载失败：{ex.Message}"); }
         }
 
         var toolbar = new StackPanel
@@ -655,6 +658,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         panel.Children.Add(Section("选区"));
         panel.Children.Add(RowText(_selInfo));
         panel.Children.Add(Row("清空", clearBtn));
+        panel.Children.Add(Section("实体统计"));
+        panel.Children.Add(RowText(_statsInfo));
         panel.Children.Add(Section("量测"));
         panel.Children.Add(RowText(_measureInfo));
         var exportCsvBtn = new Button { Classes = { "ghost" }, Content = "导出 CSV", MinWidth = 76 };
@@ -1133,6 +1138,18 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         _cloudInfo.Text = text;
     }
 
+    /// <summary>「实体统计」分段刷新：工作实体经 PickWorkingEntity 取（树面板 SetWorkingEntity 联动优先），
+    /// 数值/格式化全在 CloudStats 纯函数。事件驱动：实体增删/上传完成/变换/提取剔除走 CloudsChanged 订阅，
+    /// 选区变更在选区应用点直呼；无实体（含全部未加载）显示占位文案。禁止每帧重算。</summary>
+    private void UpdateStatsText()
+    {
+        var e = PickWorkingEntity();
+        if (e is null) { _statsInfo.Text = "未选中点云实体"; return; }
+        _statsInfo.Text = string.Join("\n", CloudStats.BuildLines(
+            e.Count, e.Loaded, e.SelCount, e.BoundsMin, e.BoundsMax)
+            .Select(l => $"{l.Label}  {l.Value}"));
+    }
+
     /// <summary>有效抽稀间隔 = 用户设置 与 交互上限（可见点>500 万时交互自动抽稀）取大者。</summary>
     private int EffStride
     {
@@ -1446,6 +1463,7 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
                             $"质心 ({aggC.X:F3}, {aggC.Y:F3}, {aggC.Z:F3}) 范围 X[{aggMin.X:F3}, {aggMax.X:F3}] Y[{aggMin.Y:F3}, {aggMax.Y:F3}] Z[{aggMin.Z:F3}, {aggMax.Z:F3}]";
         }
         else _selInfo.Text = "框选 0 点（范围内无点）";
+        UpdateStatsText();   // 选区变化 → 实体统计（选中率）事件驱动刷新
         Draw();
     }
 
@@ -1459,6 +1477,7 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
             _renderer.SetSelection(c.Id, c.Sel);
         }
         _selInfo.Text = "无（Ctrl+左键拖拽框选）";
+        UpdateStatsText();   // 选区清空 → 实体统计刷新
     }
 
     private void UpdateRubber(Point a, Point b)
@@ -1633,6 +1652,7 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
             _selInfo.Text = $"多边形选区 共 {total:N0} 点（{string.Join(" · ", parts)}）——⧉ 提取 / ✂ 剔除";
         }
         else _selInfo.Text = "多边形选区 0 点";
+        UpdateStatsText();   // 选区变化 → 实体统计（选中率）事件驱动刷新
         EndPolyMode();
         _ctx?.SetStatus($"多边形选区应用：{total:N0} 点（⧉ 提取 / ✂ 剔除）");
         Draw();
@@ -1847,7 +1867,7 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
 
     private void LoadToolOrder()
     {
-        if (_orderPath is null || !File.Exists(_orderPath)) return;
+        if (_orderPath is null || !File.Exists(_orderPath)) return;   // 豁免：路径未解析=非宿主环境；文件不存在=首次运行无配置（W4 审计）
         try
         {
             using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(_orderPath));
@@ -1865,12 +1885,12 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
                 foreach (var h in hid.EnumerateArray())
                     if (h.GetString() is { Length: > 0 } hg) _hiddenGroups.Add(hg);
         }
-        catch { }
+        catch (Exception ex) { _ctx?.SetStatus($"工具条顺序解析失败：{ex.Message}"); }
     }
 
     private void SaveToolOrder()
     {
-        if (_orderPath is null) return;
+        if (_orderPath is null) return;   // 豁免：路径未解析=非宿主环境（W4 审计）
         try
         {
             Directory.CreateDirectory(System.IO.Path.GetDirectoryName(_orderPath)!);
@@ -1886,7 +1906,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         catch (Exception ex) { _ctx?.SetStatus($"工具条顺序保存失败：{ex.Message}"); }
     }
 
-    /// <summary>组 Border 右键菜单：隐藏本组 / 重置默认顺序（显示全部+清 Hidden）。</summary>
+    /// <summary>组 Border 右键菜单：隐藏本组 / 显示隐藏组（子菜单逐组恢复+全部显示）/
+    /// 上移 / 下移 / 重置默认顺序（显示全部+清 Hidden）。恢复=从 _hiddenGroups 移除，SaveToolOrder 写回 Hidden 字段。</summary>
     private ContextMenu BuildGroupContextMenu(string name)
     {
         var menu = new ContextMenu();
@@ -1896,9 +1917,38 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
             _hiddenGroups.Add(name);
             SaveToolOrder();
             BuildToolbar(toolbarSelf!);
-            _ctx?.SetStatus($"已隐藏「{name}」组——右键其他组 → 重置默认顺序 可恢复");
+            _ctx?.SetStatus($"已隐藏「{name}」组——右键其他组 → 显示隐藏组 可逐组恢复");
         };
         menu.Items.Add(hide);
+
+        // 显示隐藏组：_hiddenGroups 非空时子菜单逐组列出（点击=移除+持久化+重建），空则禁用
+        var showHidden = new MenuItem { Header = "显示隐藏组", IsEnabled = _hiddenGroups.Count > 0 };
+        foreach (var g in _hiddenGroups.ToList())   // 快照：Click 回调晚于菜单构建，避免迭代中集合被改
+        {
+            var hidden = g;
+            var item = new MenuItem { Header = hidden };
+            item.Click += (_, _) =>
+            {
+                _hiddenGroups.Remove(hidden);
+                SaveToolOrder();
+                BuildToolbar(toolbarSelf!);
+                _ctx?.SetStatus($"已恢复「{hidden}」组显示");
+            };
+            showHidden.Items.Add(item);
+        }
+        if (_hiddenGroups.Count > 0)
+        {
+            var showAll = new MenuItem { Header = "全部显示" };
+            showAll.Click += (_, _) =>
+            {
+                _hiddenGroups.Clear();
+                SaveToolOrder();
+                BuildToolbar(toolbarSelf!);
+                _ctx?.SetStatus($"已显示全部 {_groupOrder.Count} 组");
+            };
+            showHidden.Items.Add(showAll);
+        }
+        menu.Items.Add(showHidden);
         var moveUp = new MenuItem { Header = "上移", IsEnabled = _groupOrder.IndexOf(name) > 0 };
         moveUp.Click += (_, _) =>
         {
@@ -2229,8 +2279,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         var win = TopLevel.GetTopLevel(this) as Window;
         ToolParamResult? res;
         try { res = await ToolParamDialog.ShowAsync(win, boxOp); }
-        catch { return; }
-        if (res is null) return;
+        catch (Exception ex) { _ctx?.SetStatus($"工具对话框打开失败：{ex.Message}"); return; }
+        if (res is null) return;   // 豁免：取消=用户意图，无需反馈（W4 审计）
 
         double Get(string name) => Convert.ToDouble(res.Values[Array.FindIndex(boxOp.Params, p => p.Name == name)], CultureInfo.InvariantCulture);
         bool keepInside = Convert.ToBoolean(res.Values[^1]) == false;   // keep_outside 取反
@@ -2355,8 +2405,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         var win = TopLevel.GetTopLevel(this) as Window;
         ToolParamResult? res;
         try { res = await ToolParamDialog.ShowAsync(win, op); }
-        catch { return; }
-        if (res is null) return;
+        catch (Exception ex) { _ctx?.SetStatus($"工具对话框打开失败：{ex.Message}"); return; }
+        if (res is null) return;   // 豁免：取消=用户意图，无需反馈（W4 审计）
 
         double v(int i) => Convert.ToDouble(res!.Values[i], CultureInfo.InvariantCulture);
         bool bv(int i) => Convert.ToBoolean(res!.Values[i]);
@@ -2419,8 +2469,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         var win = TopLevel.GetTopLevel(this) as Window;
         ToolParamResult? res;
         try { res = await ToolParamDialog.ShowAsync(win, op); }
-        catch { return; }
-        if (res is null) return;
+        catch (Exception ex) { _ctx?.SetStatus($"工具对话框打开失败：{ex.Message}"); return; }
+        if (res is null) return;   // 豁免：取消=用户意图，无需反馈（W4 审计）
         double dist = Convert.ToDouble(res.Values[0], CultureInfo.InvariantCulture);
         int iters = Convert.ToInt32(res.Values[1], CultureInfo.InvariantCulture);
         int rounds = Convert.ToInt32(res.Values[2], CultureInfo.InvariantCulture);
@@ -2490,7 +2540,7 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
     /// <summary>视图设置持久化（变更即存）：抽稀/截断/切片/色带域/投影/锁定轴。</summary>
     private void SaveViewSettings()
     {
-        if (_settingsPath is null) return;
+        if (_settingsPath is null) return;   // 豁免：路径未解析=非宿主环境，运行时构造必赋值（W4 审计）
         CloudViewSettings.Save(_settingsPath, new CloudViewSettings
         {
             Stride = _stride,
@@ -2668,8 +2718,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         var win = TopLevel.GetTopLevel(this) as Window;
         ToolParamResult? res;
         try { res = await ToolParamDialog.ShowAsync(win, op); }
-        catch { return; }
-        if (res is null) return;
+        catch (Exception ex) { _ctx?.SetStatus($"工具对话框打开失败：{ex.Message}"); return; }
+        if (res is null) return;   // 豁免：取消=用户意图，无需反馈（W4 审计）
         double radius = Convert.ToDouble(res.Values[0], CultureInfo.InvariantCulture);
         try
         {
@@ -2704,8 +2754,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         var win = TopLevel.GetTopLevel(this) as Window;
         ToolParamResult? res;
         try { res = await ToolParamDialog.ShowAsync(win, op); }
-        catch { return; }
-        if (res is null) return;
+        catch (Exception ex) { _ctx?.SetStatus($"工具对话框打开失败：{ex.Message}"); return; }
+        if (res is null) return;   // 豁免：取消=用户意图，无需反馈（W4 审计）
         int gridW = Convert.ToInt32(res.Values[0], CultureInfo.InvariantCulture);
         bool exportCsv = Convert.ToBoolean(res.Values[1]);
         bool exportPng = Convert.ToBoolean(res.Values[2]);
@@ -2835,8 +2885,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         var win = TopLevel.GetTopLevel(this) as Window;
         ToolParamResult? res;
         try { res = await ToolParamDialog.ShowAsync(win, op, cloudChoices: choices, preselect: (movDefault, choices.FirstOrDefault(c => c != movDefault))); }
-        catch { return; }
-        if (res is null) return;
+        catch (Exception ex) { _ctx?.SetStatus($"工具对话框打开失败：{ex.Message}"); return; }
+        if (res is null) return;   // 豁免：取消=用户意图，无需反馈（W4 审计）
         if (!_clouds.TryGetValue(res.CloudA!, out var mov) || !_clouds.TryGetValue(res.CloudB!, out var rf))
         {
             _ctx?.SetStatus("质心对齐：基准/被移动实体无效");
@@ -2883,6 +2933,7 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         src.SelCount = n;
         _renderer.SetSelection(src.Id, sel);
         _selInfo.Text = $"全选 {n:N0} 点（{src.Id}）——提取 / 剔除 / 反选可用";
+        UpdateStatsText();   // 选区变化 → 实体统计（选中率）事件驱动刷新
         Draw();
         _ctx?.SetStatus($"已全选「{src.Id}」{n:N0} 点");
     }
@@ -2897,6 +2948,7 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         src.SelCount = n;
         _renderer.SetSelection(src.Id, sel);
         _selInfo.Text = $"反选后 {n:N0} 点（{src.Id}）——提取 / 剔除可用";
+        UpdateStatsText();   // 选区变化 → 实体统计（选中率）事件驱动刷新
         Draw();
         _ctx?.SetStatus($"已反选：{n:N0} 点");
     }
@@ -3020,8 +3072,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         var win = TopLevel.GetTopLevel(this) as Window;
         ToolParamResult? res;
         try { res = await ToolParamDialog.ShowAsync(win, op); }
-        catch { return; }
-        if (res is null) return;
+        catch (Exception ex) { _ctx?.SetStatus($"工具对话框打开失败：{ex.Message}"); return; }
+        if (res is null) return;   // 豁免：取消=用户意图，无需反馈（W4 审计）
         double voxel = Convert.ToDouble(res.Values[0], CultureInfo.InvariantCulture);
         try
         {
@@ -3188,8 +3240,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         var win = TopLevel.GetTopLevel(this) as Window;
         ToolParamResult? res;
         try { res = await ToolParamDialog.ShowAsync(win, op); }
-        catch { return; }
-        if (res is null) return;
+        catch (Exception ex) { _ctx?.SetStatus($"工具对话框打开失败：{ex.Message}"); return; }
+        if (res is null) return;   // 豁免：取消=用户意图，无需反馈（W4 审计）
         double ratio = Convert.ToDouble(res.Values[0], CultureInfo.InvariantCulture);
         try
         {
@@ -3233,8 +3285,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         var win = TopLevel.GetTopLevel(this) as Window;
         ToolParamResult? res;
         try { res = await ToolParamDialog.ShowAsync(win, op); }
-        catch { return; }
-        if (res is null) return;
+        catch (Exception ex) { _ctx?.SetStatus($"工具对话框打开失败：{ex.Message}"); return; }
+        if (res is null) return;   // 豁免：取消=用户意图，无需反馈（W4 审计）
         double radius = Convert.ToDouble(res.Values[0], CultureInfo.InvariantCulture);
         int minN = Convert.ToInt32(res.Values[1], CultureInfo.InvariantCulture);
         try
@@ -3361,6 +3413,7 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
     {
         if (id is not null && _clouds.ContainsKey(id)) _workingEntity = id;
         else _workingEntity = null;
+        UpdateStatsText();   // 工作实体切换 → 「实体统计」分段跟随刷新（事件驱动）
     }
 
     /// <summary>工作实体：树显式指定 → 有选区者优先 → 第一个可见已加载 → 任意已加载。</summary>
@@ -3562,8 +3615,8 @@ public sealed class Cloud3DView : UserControl, IDisposable, IPanelParamsProvider
         var win = TopLevel.GetTopLevel(this) as Window;
         ToolParamResult? res;
         try { res = await ToolParamDialog.ShowAsync(win, op, prefill, choices, (sel?.Id, null)); }
-        catch { return; }
-        if (res is null) return;
+        catch (Exception ex) { _ctx?.SetStatus($"工具对话框打开失败：{ex.Message}"); return; }
+        if (res is null) return;   // 豁免：取消=用户意图，无需反馈（W4 审计）
 
         var inputs = new List<CloudPayload>();
         if (op.CloudInputs == 2 && choices is not null)

@@ -212,7 +212,7 @@ public sealed class AlgoSidebar : UserControl
         _pipelineSection.Children.Clear();
         _pipelineRows.Clear();
         _rowByPath.Clear();
-        var dir = Path.Combine(AppPaths.RepoRoot, "config", "algorithms");
+        var dir = Path.Combine(ComUI.Sdk.AppPaths.RepoRoot, "config", "algorithms");
         var files = Directory.Exists(dir)
             ? Directory.EnumerateFiles(dir, "*.pipeline.json").ToList()
             : new List<string>();
